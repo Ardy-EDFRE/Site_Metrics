@@ -1,0 +1,333 @@
+import os
+import arcpy
+from arcgis.gis import GIS
+from arcgis.features import FeatureSet, GeoAccessor, GeoSeriesAccessor
+from arcgis.geometry import Geometry
+from arcgis.geometry.filters import intersects
+from arcgis.features.manage_data import overlay_layers
+from arcgis.features import find_locations
+from arcgis.geometry import filters
+from timer import Timer
+import pandas as pd
+import json
+import time
+from uuid import uuid4
+
+
+def mapParcelIDandRunIDFields(inParcels, inParcelsIDField):
+    runID = str(uuid4())
+
+    inParcelsJson = inParcels.JSON
+    inParcelsJson = inParcelsJson.replace(inParcelsIDField, 'parcelid')
+    inParcelsDict = json.loads(inParcelsJson)
+
+    newFieldsList = [f for f in inParcelsDict['fields'] if 'parcelid' not in f['name']]
+    parcelIDField = {
+        "name": "parcelid",
+        "type": "esriFieldTypeString",
+        "alias": "parcelid",
+        "length": 255
+    }
+    runIDField = {
+        "name": "runid",
+        "type": "esriFieldTypeString",
+        "alias": "runid",
+        "length": 255
+    }
+    newFieldsList.append(parcelIDField)
+    newFieldsList.append(runIDField)
+    inParcelsDict['fields'] = newFieldsList
+
+    # add the runID value to all the features
+    for f in inParcelsDict['features']:
+        f['attributes']['runid'] = runID
+
+    inParcels_api_fset = FeatureSet.from_dict(inParcelsDict)
+
+    return inParcels_api_fset
+
+
+def uploadFeaturesToGeoportalLyr(inParcels, inputParcelsLyr, idFieldName):
+    # push the parcels to the parcels layer in geoportal
+    inParcels_api_fset = mapParcelIDandRunIDFields(inParcels, idFieldName)
+    # inParcels.save(r"G:\Users\JoseLuis\arcgis_scripts_enxco\site_metrics", "test.shp")
+
+    inputParcelsLyr.delete_features(where="1=1")
+    # When making large number (250+ records at once) of edits,
+    # append should be used over edit_features to improve performance and ensure service stability.
+    inputParcelsLyr.edit_features(adds=inParcels_api_fset)
+
+    return inputParcelsLyr
+
+
+def createInAndOutBuildableField(unionFLyr):
+    union_fset = unionFLyr.query()
+    union_features = union_fset.features
+
+    fid_job_column = [col for col in union_features[0].fields if 'fid_j' in col][0]
+
+    for fd in union_features:
+        if fd.attributes[fid_job_column] < 1:
+            fd.attributes['parcel_bld_id'] = fd.attributes['parcelid'] + '_0'
+        else:
+            fd.attributes['parcel_bld_id'] = fd.attributes['parcelid'] + '_1'
+
+    unionFLyr.edit_features(updates=union_features)
+
+    return unionFLyr
+
+
+try:
+    tool_run_time = Timer()
+    tool_run_time.start()
+
+    inParcels = arcpy.GetParameter(0)
+    idFieldNameParcels = arcpy.GetParameterAsText(1)
+    idFieldNameBldParcels = arcpy.GetParameterAsText(2)
+
+    #    # debug only  *****************************
+    inParcels = r"G:\Users\Ardy\GIS\APRX\scratch.gdb\test_polys"
+    idFieldNameParcels = 'parcelid'
+    idFieldNameBldParcels = 'parcel_bld_id'
+    #    # debug only end  *****************************
+
+    inParcels = arcpy.FeatureSet(inParcels)
+    parcelsBuildableUnionLayerName = "sitemetrics_parcels_buildable_union"
+
+    # the stats for each parcel are for the total of the parcel and for the buildable part of the parcel
+    # prepare the input parcels and intersect with the buildable land
+    gis = GIS("https:??geoportal.edf-re.com?portal".replace(':??', '://').replace('?', '/'),
+              "Geoportalcreator", "secret1creator**")
+
+    # find the solar national buildable land layer
+    buildableItem = gis.content.get('21d180c3e40847a69c32cec4166fbeca')
+    buildableLyr = buildableItem.layers[0]
+
+    # find the site metric parcels layer
+    inputParcelsItem = gis.content.search('site_metrics_inputParcels', 'feature layer')[0]
+    inputParcelsLyr = inputParcelsItem.layers[0]
+
+    inParcelsDesc = arcpy.Describe(inParcels)
+    inParcelsExtent = inParcelsDesc.extent
+    # creating context object and send to image server
+    context = {"extent": {"xmin": inParcelsExtent.XMin,
+                          "ymin": inParcelsExtent.YMin,
+                          "xmax": inParcelsExtent.XMax,
+                          "ymax": inParcelsExtent.YMax,
+                          "spatialReference": {"wkid": inParcelsDesc.spatialReference.factoryCode}},
+               "overwrite": True
+               }
+
+    # Intersect buildable and parcels in geoportal
+    inputParcelsLyr.delete_features(where="1 = 1")
+
+    inputParcelsLyr = uploadFeaturesToGeoportalLyr(inParcels, inputParcelsLyr, idFieldNameParcels)
+
+    # intersecting buildable lands polys into a (new or preexisting) geoportal layer
+    # https://developers.arcgis.com/python/api-reference/arcgis.features.find_locations.html
+    try:
+        parcel_bld_item = gis.content.search('tmpParcelSolar', 'feature layer')[0]
+        parcel_bld_item.delete()
+    except Exception as e:
+        print('tmpParcelSolar does not exist yet')
+
+    arcpy.AddMessage("Finding existing buildable parcels")
+    # 00:00:58.45 seconds - intersect find_locations
+    # find_locations - derive_new_locations returns partial feature records vs find_existing_locations was returning a much larger area
+    # selected_buildable_layer = find_locations.derive_new_locations(input_layers=[buildableLyr, inputParcelsLyr],
+    #                                                                expressions=[{"operator": "and", "layer": 0,
+    #                                                                              "spatialRel": "intersects",
+    #                                                                              "selectingLayer": 1}],
+    #                                                                output_name='tmpParcelSolar', context=context)
+
+    # 00:00:58.528 - withinDistance 0.1 feet find_locations
+    selected_buildable_layer = find_locations.derive_new_locations(input_layers=[buildableLyr, inputParcelsLyr],
+                                                                   expressions=[{"operator": "and",
+                                                                                 "layer": 0,
+                                                                                 "spatialRel": "withinDistance",
+                                                                                 "selectingLayer": 1,
+                                                                                 "distance": 0.001,
+                                                                                 "units": "feet"}],
+                                                                   output_name='tmpParcelSolar', context=context)
+
+    # gis.content.search is for name specific & gis.content.get is for item id specific
+    try:
+        parcels_item = gis.content.search('sitemetrics_parcels_buildable_union')[0]
+        parcels_item.delete()
+    except Exception as e:
+        print('sitemetrics_parcels_buildable_union does not exist yet')
+
+    arcpy.AddMessage("Unionning parcels with solar national buildable land")
+    unionItem = overlay_layers(inputParcelsLyr, selected_buildable_layer, overlay_type='Union',
+                               output_name=parcelsBuildableUnionLayerName, context=context)
+
+    unionFLyr = unionItem.layers[0]
+
+    # remove any parcels outside of union EXAMPLE: "parcelid = -1"
+    unionFLyr.delete_features(where="parcelid = ''")
+
+    # modify parcelid If fid_feature_set  is -1 then parcelid = parcelid_0 otherwise parcelid  = parcelid_1)
+    # add new parcelid field for identifying within buildable (parcel_bld_id)
+    parcel_bld_def = {'name': 'parcel_bld_id',
+                      'type': 'esriFieldTypeString',
+                      'alias': 'parcel_bld_id',
+                      'domain': None,
+                      'editable': True,
+                      'nullable': True,
+                      'sqlType': 'sqlTypeVarchar',
+                      'length': 255}
+
+    unionFLyr.manager.add_to_definition({'fields': [parcel_bld_def]})
+
+    unionFLyr = createInAndOutBuildableField(unionFLyr)
+
+    # get the current run ids. do we really need this?
+    tmp_parcel_df = unionFLyr.query(as_df=True)
+    tmp_run_id = tmp_parcel_df['runid'][0]
+
+    # Make gp service calls asynchronously
+    raster_service_inputs = ['Forests_Only_From_LANDFIRE', 'Slope_over10perc_ned2usa_60m']
+    vector_service_inputs = ['Transmission_Lines_from_Velocity_Suite']
+
+    arcpy.ImportToolbox(
+        'https://geoportal.edf-re.com/raggp/services;Other/getAcresAndPercRaster;token={};{}'.format(gis._con.token,
+                                                                                                     gis.url))
+
+    arcpy.ImportToolbox(
+        'https://geoportal.edf-re.com/raggp/services;Other/getAcresAndPercVector;token={};{}'.format(gis._con.token,
+                                                                                                     gis.url))
+
+    arcpy.AddMessage("Making Raster Calls")
+    resultList = []
+    # Make raster calls
+    for tmp_raster in raster_service_inputs:
+        tmp_raster_result = arcpy.getAcresAndPercRaster.getAcresAndPercRaster(parcelsBuildableUnionLayerName,
+                                                                              tmp_run_id,
+                                                                              idFieldNameParcels, idFieldNameBldParcels,
+                                                                              'Area in Square Miles', tmp_raster)
+        resultList.append(tmp_raster_result)
+        arcpy.AddMessage(tmp_raster)
+
+    arcpy.AddMessage("Making Vector Calls")
+    # Make vector calls
+    for tmp_vector in vector_service_inputs:
+        tmp_vector_result = arcpy.getAcresAndPercVector.getAcresAndPercVector(parcelsBuildableUnionLayerName,
+                                                                              tmp_run_id,
+                                                                              idFieldNameParcels, idFieldNameBldParcels,
+                                                                              tmp_vector)
+        resultList.append(tmp_vector_result)
+        arcpy.AddMessage(tmp_vector)
+
+    arcpy.AddMessage('All gp service calls done')
+
+    # Wait for all the calls to be processed
+    waitTimeStart = time.time()
+    for tmp_result in resultList:
+        while tmp_result.status < 4:
+            time.sleep(0.2)
+            waitTime = time.time() - waitTimeStart
+            if waitTime > 120:
+                arcpy.AddMessage(f"Error: map service not responding. {tmp_result}")
+                sys.exit()
+
+    # # This is added to get the resultOutputs from our gp results list to a record set
+    # arcpy.AddMessage("Cleaning up final table")
+    # df_list = []
+    # for result in resultList:
+    #     d = json.loads(result.getOutput(0).JSON)            # response from gp calls as JSON
+    #     df = pd.json_normalize(d, record_path=['features']) # dataframe created from JSON
+    #     df_list.append(df)
+    #
+    # final_stats_table_merge = pd.concat(df_list, axis=1)
+    # final_stats_table_merge.reset_index(inplace=True)
+    # final_stats_table_merge.columns = final_stats_table_merge.columns.str.replace('attributes.', '')    # JSON is converted but has attributes.something when creating columns in dataframe
+    # final_stats_table_merge = final_stats_table_merge.T.drop_duplicates().T                             # Dropping duplicate OBJECTID & ParcelID columns
+    #
+    # arcpy.AddMessage("Creating final record set")
+    # site_metrics_record_set = arcpy.RecordSet()
+    # final_stats_table = final_stats_table_merge.spatial.to_featureset()
+    # site_metrics_record_set.load(final_stats_table)
+    # arcpy.SetParameter(3, site_metrics_record_set)
+
+    # # # Make RASTER calls
+    # rasterGPService = import_toolbox(
+    #     'https://geoportal.edf-re.com/raggp/rest/services/Other/getAcresAndPercRaster/GPServer', gis)
+    # raster_service_inputs = ['Forests_Only_From_LANDFIRE', 'Slope_over10perc_ned2usa_60m']
+    #
+    # # change this from synchronous to asynchronous
+    # rasterResultList = []
+    # for tmp_raster in raster_service_inputs:
+    #     rasterResultList.append(rasterGPService.getacresandperc_raster(parcelsBuildableUnionLayerName, tmp_run_id, idFieldNameParcels,
+    #                                                                    idFieldNameBldParcels, 'Area in Square Miles', tmp_raster))
+
+    # if rasterResultList:
+    #     # bring all stats back into main parcel table
+    #     raster_dfs = [df.stats.sdf.set_index('parcelid') for df in rasterResultList]
+    #     raster_stats_table_merge = pd.concat(raster_dfs, axis=1)
+    #     raster_stats_table_merge.reset_index(inplace=True)
+    #     raster_stats_table_merge = raster_stats_table_merge.T.drop_duplicates().T
+    #
+    #     if 'ObjectID' in raster_stats_table_merge.columns:
+    #         raster_stats_table_merge.drop('ObjectID', axis=1, inplace=True)
+    #
+    #     arcpy.AddMessage("Creating raster record set")
+    #     raster_record_set = arcpy.RecordSet()
+    #     raster_stats_table = raster_stats_table_merge.spatial.to_featureset()
+    #     raster_record_set.load(raster_stats_table)
+    #     arcpy.SetParameter(2, raster_record_set)
+    #
+    # # # Make VECTOR calls
+    # vectorGPService = import_toolbox(
+    #     'https://geoportal.edf-re.com/raggp/rest/services/Other/getAcresAndPercVector/GPServer', gis)
+    #
+    # vector_service_inputs = [
+    #     'Transmission_Lines_from_Velocity_Suite'
+    # ]
+    #
+    # vector_run_time = Timer()
+    # vector_run_time.start()
+    #
+    # vectorResultList = []
+    # for tmp_vector in vector_service_inputs:
+    #     tmp_vector_result = vectorGPService.getacresandperc_vector('sitemetrics_parcels_buildable_union', tmp_run_id,
+    #                                                                'parcelid', 'parcel_bld_id', tmp_vector)
+    #     vectorResultList.append(tmp_vector_result)
+    #
+    # # df_runs_test = Timer()
+    # # df_runs_test.start()
+    #
+    # if vectorResultList:
+    #     # bring all stats back into main parcel table
+    #     vector_dfs = [df.stats_table.sdf.set_index('parcelid') for df in vectorResultList]
+    #     vector_stats_table_merge = pd.concat(vector_dfs, axis=1)
+    #     vector_stats_table_merge.reset_index(inplace=True)
+    #     vector_stats_table_merge = vector_stats_table_merge.T.drop_duplicates().T
+    #
+    # final_stats_table_merge = pd.concat([vector_stats_table_merge, raster_stats_table_merge], axis=1)
+    # final_stats_table_merge.reset_index(inplace=True)
+    # final_stats_table_merge = final_stats_table_merge.T.drop_duplicates().T
+    #
+    #     arcpy.AddMessage("Creating vector record set")
+    #     record_set = arcpy.RecordSet()
+    #     final_stats_table = final_stats_table_merge.spatial.to_featureset()
+    #     record_set.load(final_stats_table)
+    #     arcpy.SetParameter(3, record_set)
+
+    # set the output as a featureset
+    elapsed_time = time.time() - tool_run_time
+    timeString = time.strftime('%H:%M:%S' + str(round(elapsed_time % 1, 3))[1:], time.gmtime(elapsed_time))
+    arcpy.AddMessage(timeString)
+    arcpy.AddMessage("Success")
+
+except arcpy.ExecuteError:
+    print('-1-')
+    print(arcpy.GetMessages(1))
+    print('-2-')
+    print(arcpy.GetMessages(2))
+    arcpy.AddError('-1-')
+    arcpy.AddError(arcpy.GetMessages(1))
+    arcpy.AddError('-2-')
+    arcpy.AddError(arcpy.GetMessages(2))
+except Exception as e:
+    print(e)
+    arcpy.AddError(e)
