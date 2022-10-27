@@ -83,14 +83,14 @@ try:
 
     inParcels = arcpy.GetParameter(0)
     idFieldNameParcels = arcpy.GetParameterAsText(1)
-    idFieldNameBldParcels = arcpy.GetParameterAsText(2)
 
     # debug only  *****************************
     # inParcels = r"G:\Users\Ardy\GIS\APRX\scratch.gdb\test_polys_nozm"
-    # idFieldNameParcels = 'parcelid'
-    # idFieldNameBldParcels = 'parcel_bld_id'
+    # inParcels = r"G:\Projects\USA_West\Flores\05_GIS\053_Data\Parcels_Flores_CoreLogic_ToLoad_LPM_20221024.shp"
+    # idFieldNameParcels = 'FID'
     # debug only end  *****************************
 
+    idFieldNameBldParcels = 'parcel_bld_id'
     inParcels = arcpy.FeatureSet(inParcels)
 
     # converting the inParcels featureset to a spatial dataframe
@@ -98,7 +98,8 @@ try:
     parcelsSDF = pd.DataFrame.spatial.from_featureclass('memory/tmp1')
     arcpy.Delete_management('memory/tmp1')
 
-    parcelsSDF[idFieldNameParcels] = parcelsSDF[idFieldNameParcels].astype('int')
+    if type(parcelsSDF[idFieldNameParcels]) == 'Str':
+        parcelsSDF[idFieldNameParcels] = parcelsSDF[idFieldNameParcels].astype('int')
 
     parcelsBuildableUnionLayerName = "sitemetrics_parcels_buildable_union"
 
@@ -139,7 +140,7 @@ try:
     except Exception as e:
         print('tmpParcelSolar does not exist yet')
 
-    arcpy.AddMessage("Finding existing buildable parcels")
+    arcpy.AddMessage("Uploading parcels")
     # 00:00:58.45 seconds - intersect find_locations
     # find_locations - derive_new_locations returns partial feature records vs find_existing_locations was returning a much larger area
     # selected_buildable_layer = find_locations.derive_new_locations(input_layers=[buildableLyr, inputParcelsLyr],
@@ -165,7 +166,7 @@ try:
     except Exception as e:
         print('sitemetrics_parcels_buildable_union does not exist yet')
 
-    arcpy.AddMessage("Unionning parcels with solar national buildable land")
+    arcpy.AddMessage("Unionising parcels with solar national buildable land")
     unionItem = overlay_layers(inputParcelsLyr, selected_buildable_layer, overlay_type='Union',
                                output_name=parcelsBuildableUnionLayerName, context=context)
 
@@ -204,7 +205,8 @@ try:
 
     # pivot table to convert parcelsBuildableUnionIDField to parcelid
     summarize_df['buildableIndex'] = summarize_df[idFieldNameBldParcels].str[-1:]
-    tmp_pivot_table = summarize_df.pivot_table(index=idFieldNameParcels, columns='buildableIndex', values='analysisarea')
+    tmp_pivot_table = summarize_df.pivot_table(index=idFieldNameParcels, columns='buildableIndex',
+                                               values='analysisarea')
     tmp_pivot_table.reset_index(inplace=True)
     tmp_pivot_table.rename(
         columns={'0': 'outBldAcres',
@@ -214,7 +216,7 @@ try:
 
     # Make gp service calls asynchronously
     raster_service_inputs = ['Forests_Only_From_LANDFIRE', 'Slope_over10perc_ned2usa_60m']
-    vector_service_inputs = ['Transmission_Lines_from_Velocity_Suite']
+    vector_service_inputs = ['1a58e6becd2d4ba4bb8c401997bebe29']
 
     rasterToolbox = 'https://geoportal.edf-re.com/raggp/services;Other/getAcresAndPercRaster;token={};{}'.format(
         gis._con.token, gis.url)
@@ -232,7 +234,7 @@ try:
                                                                               idFieldNameParcels, idFieldNameBldParcels,
                                                                               'Area in Square Miles', tmp_raster)
         resultList.append(tmp_raster_result)
-        arcpy.AddMessage(f"   {tmp_raster}")
+        # arcpy.AddMessage(f"   {tmp_raster.properties.name}")
 
     arcpy.AddMessage("Making Vector Calls")
     # Make vector calls
@@ -242,7 +244,7 @@ try:
                                                                               idFieldNameParcels, idFieldNameBldParcels,
                                                                               tmp_vector)
         resultList.append(tmp_vector_result)
-        arcpy.AddMessage(f"   {tmp_vector}")
+        # arcpy.AddMessage(f"   {tmp_vector.properties.name}")
 
     # Wait for all the calls to be processed
     waitTimeStart = time.time()
@@ -264,22 +266,25 @@ try:
         df_list.append(df)
 
     # join all the tables at once because they are in a list
+    # fix concat to join function
     final_stats_table_merge = pd.concat(df_list, axis=1)
     final_stats_table_merge.reset_index(inplace=True)
-    final_stats_table_merge.columns = final_stats_table_merge.columns.str.replace('attributes.', '')    # JSON is converted but has attributes.something when creating columns in dataframe
-    final_stats_table_merge = final_stats_table_merge.T.drop_duplicates().T                             # Dropping duplicate OBJECTID & ParcelID columns
+    final_stats_table_merge.columns = final_stats_table_merge.columns.str.replace('attributes.',
+                                                                                  '')  # JSON is converted but has attributes.something when creating columns in dataframe
+    final_stats_table_merge = final_stats_table_merge.T.drop_duplicates().T  # Dropping duplicate OBJECTID & ParcelID columns
 
     # join the final statists table with the input parcels
     final_stats_table_merge = final_stats_table_merge.join(parcelBuildableAcres, on=idFieldNameParcels)
     final_stats_table_merge[idFieldNameParcels] = final_stats_table_merge[idFieldNameParcels].astype('int')
-    parcelsWithStatsSDF = parcelsSDF.merge(final_stats_table_merge, left_on=idFieldNameParcels, right_on=idFieldNameParcels)
+    parcelsWithStatsSDF = parcelsSDF.merge(final_stats_table_merge, left_on=idFieldNameParcels,
+                                           right_on=idFieldNameParcels)
 
     # return the statistics recordset
     arcpy.AddMessage("Creating final record set")
     inParcelsWithStats_arcpyfset = arcpy.FeatureSet()
     inParcelsWithStats_arcgisfset = parcelsWithStatsSDF.spatial.to_featureset()
     inParcelsWithStats_arcpyfset.load(inParcelsWithStats_arcgisfset)
-    arcpy.SetParameter(3, inParcelsWithStats_arcpyfset)
+    arcpy.SetParameter(2, inParcelsWithStats_arcpyfset)
 
     # elapsed_time = time.time() - tool_run_time
     # timeString = time.strftime('%H:%M:%S' + str(round(elapsed_time % 1, 3))[1:], time.gmtime(elapsed_time))
