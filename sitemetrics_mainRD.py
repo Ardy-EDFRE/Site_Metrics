@@ -165,7 +165,7 @@ try:
         parcel_bld_item = gis.content.search('tmpParcelSolar', 'feature layer')[0]
         parcel_bld_item.delete()
     except Exception as e:
-        print('tmpParcelSolar does not exist yet')
+        print('tmpParcelSolar does not exist yet...')
 
     arcpy.AddMessage("Uploading parcels")
     # 00:00:58.45 seconds - intersect find_locations
