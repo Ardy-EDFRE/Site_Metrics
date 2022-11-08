@@ -1,5 +1,6 @@
 import os
 import arcpy
+from collections import namedtuple
 from arcgis.gis import GIS
 from arcgis.features import FeatureSet, GeoAccessor, GeoSeriesAccessor
 from arcgis.geometry import Geometry
@@ -7,7 +8,6 @@ from arcgis.geometry.filters import intersects
 from arcgis.features.manage_data import overlay_layers
 from arcgis.features import find_locations
 from arcgis.geometry import filters
-from timer import Timer
 import pandas as pd
 import json
 import time
@@ -78,22 +78,49 @@ def createInAndOutBuildableField(unionFLyr):
 
 
 try:
-    # tool_run_time = Timer()
-    # tool_run_time.start()
-
     inParcels = arcpy.GetParameter(0)
     idFieldNameParcels = arcpy.GetParameterAsText(1)
 
     # debug only  *****************************
     # inParcels = r"G:\Users\Ardy\GIS\APRX\scratch.gdb\test_polys_nozm"
+    inParcels = r"G:\Users\Ardy\GIS\APRX\scratch.gdb\test_parcels_FEMA"
+    idFieldNameParcels = 'parcelid'
     # inParcels = r"G:\Projects\USA_West\Flores\05_GIS\053_Data\Parcels_Flores_CoreLogic_ToLoad_LPM_20221024.shp"
     # idFieldNameParcels = 'FID'
     # debug only end  *****************************
 
     idFieldNameBldParcels = 'parcel_bld_id'
+
+    # the BL_Source is always the Solar national
+
+    # Buildable Land # FEMA 100 Year Floodplain  # 500 Year Floodplain
+    # BL_Source      # F100_Acres                # F500_Acres
+    # BL_Acres       # F100_Pcnt                 # F500_Pcnt
+    # BL_Pcnt        # F100_BL_Acres             # F500_BL_Acres
+                     # F100_BL_Pcnt              # F500_BL_Pcnt
+
+    # Slope(raster)      # Forested Land(raster)  # Bedrock - Shallow   # Bedrock - MidDepth(101 to 300 cm)
+    # Slp10_Acres        # Forest_Acres           # BdRckSh_Acres       # BdRckMD_Acres
+    # Slp10_Pcnt         # Forest_Pcnt            # BdRckSh_Pcnt        # BdRckMD_Pcnt
+    # Slp10_BL_Acres     # Forest_BL_Acres        # BdRckSh_BL_Acres    # BdRckMD_BL_Acres
+    # Slp10_BL_Pcnt      # Forest_BL_Pcnt         # BdRckSh_BL_Pcnt     # BdRckMD_BL_Pcnt
+
+    raster_inputs = {
+        "Forests_Only_From_LANDFIRE":  "Forest",
+        'Slope_over10perc_ned2usa_60m': "Slp10"
+    }
+    vectorParams = namedtuple("vectorParams", "vectorItemName field whereClause")
+    vector_inputs = {
+        "FEMA100": vectorParams("FEMA Flood Hazard Areas", 'F100', "FLD_ZONE in ('A', 'A99', 'AE', 'AH', 'AO')"),
+        "FEMA500": vectorParams("FEMA Flood Hazard Areas", 'F500', "FLD_ZONE in ('X')")
+    }
+
+    # raster_service_inputs = ['Forests_Only_From_LANDFIRE', 'Slope_over10perc_ned2usa_60m']
+    # vector_service_inputs = ['1a58e6becd2d4ba4bb8c401997bebe29']
+
     inParcels = arcpy.FeatureSet(inParcels)
 
-    # converting the inParcels featureset to a spatial dataframe
+    # converting the inParcels featureset to a spatial dataframe. We will join the stats to parcelsSDF
     arcpy.CopyFeatures_management(inParcels, 'memory/tmp1')
     parcelsSDF = pd.DataFrame.spatial.from_featureclass('memory/tmp1')
     arcpy.Delete_management('memory/tmp1')
@@ -215,9 +242,6 @@ try:
     df_list.append(tmp_pivot_table)
 
     # Make gp service calls asynchronously
-    raster_service_inputs = ['Forests_Only_From_LANDFIRE', 'Slope_over10perc_ned2usa_60m']
-    vector_service_inputs = ['1a58e6becd2d4ba4bb8c401997bebe29']
-
     rasterToolbox = 'https://geoportal.edf-re.com/raggp/services;Other/getAcresAndPercRaster;token={};{}'.format(
         gis._con.token, gis.url)
     vectorToolbox = 'https://geoportal.edf-re.com/raggp/services;Other/getAcresAndPercVector;token={};{}'.format(
@@ -228,23 +252,24 @@ try:
     arcpy.AddMessage("Making Raster Calls")
     resultList = []
     # Make raster calls
-    for tmp_raster in raster_service_inputs:
+    for tmp_raster in raster_inputs:
+        tmpFieldPrefix = raster_inputs[tmp_raster]
         tmp_raster_result = arcpy.getAcresAndPercRaster.getAcresAndPercRaster(parcelsBuildableUnionLayerName,
                                                                               tmp_run_id,
                                                                               idFieldNameParcels, idFieldNameBldParcels,
-                                                                              'Area in Square Miles', tmp_raster)
+                                                                              'Area in Square Miles',
+                                                                              tmp_raster, tmpFieldPrefix)
         resultList.append(tmp_raster_result)
-        # arcpy.AddMessage(f"   {tmp_raster.properties.name}")
 
     arcpy.AddMessage("Making Vector Calls")
     # Make vector calls
-    for tmp_vector in vector_service_inputs:
+    for tmp_vector in vector_inputs:
+        tmpVectorItem = vector_inputs[tmp_vector]
         tmp_vector_result = arcpy.getAcresAndPercVector.getAcresAndPercVector(parcelsBuildableUnionLayerName,
                                                                               tmp_run_id,
                                                                               idFieldNameParcels, idFieldNameBldParcels,
-                                                                              tmp_vector)
+                                                                              tmpVectorItem.vectorItemName, tmpVectorItem.field, tmpVectorItem.whereClause)
         resultList.append(tmp_vector_result)
-        # arcpy.AddMessage(f"   {tmp_vector.properties.name}")
 
     # Wait for all the calls to be processed
     waitTimeStart = time.time()
