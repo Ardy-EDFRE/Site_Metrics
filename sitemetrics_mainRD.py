@@ -1,4 +1,4 @@
-import os
+import os, sys
 import arcpy
 from collections import namedtuple
 from arcgis.gis import GIS
@@ -83,8 +83,8 @@ try:
 
     # debug only  *****************************
     # inParcels = r"G:\Users\Ardy\GIS\APRX\scratch.gdb\test_polys_nozm"
-    inParcels = r"G:\Users\Ardy\GIS\APRX\scratch.gdb\test_parcels_FEMA"
-    idFieldNameParcels = 'parcelid'
+    # inParcels = r"G:\Users\Ardy\GIS\APRX\scratch.gdb\test_parcels_FEMA"
+    # idFieldNameParcels = 'parcelid'
     # inParcels = r"G:\Projects\USA_West\Flores\05_GIS\053_Data\Parcels_Flores_CoreLogic_ToLoad_LPM_20221024.shp"
     # idFieldNameParcels = 'FID'
     # debug only end  *****************************
@@ -114,9 +114,6 @@ try:
         "FEMA100": vectorParams("FEMA Flood Hazard Areas", 'F100', "FLD_ZONE in ('A', 'A99', 'AE', 'AH', 'AO')"),
         "FEMA500": vectorParams("FEMA Flood Hazard Areas", 'F500', "FLD_ZONE in ('X')")
     }
-
-    # raster_service_inputs = ['Forests_Only_From_LANDFIRE', 'Slope_over10perc_ned2usa_60m']
-    # vector_service_inputs = ['1a58e6becd2d4ba4bb8c401997bebe29']
 
     inParcels = arcpy.FeatureSet(inParcels)
 
@@ -168,14 +165,6 @@ try:
         print('tmpParcelSolar does not exist yet')
 
     arcpy.AddMessage("Uploading parcels")
-    # 00:00:58.45 seconds - intersect find_locations
-    # find_locations - derive_new_locations returns partial feature records vs find_existing_locations was returning a much larger area
-    # selected_buildable_layer = find_locations.derive_new_locations(input_layers=[buildableLyr, inputParcelsLyr],
-    #                                                                expressions=[{"operator": "and", "layer": 0,
-    #                                                                              "spatialRel": "intersects",
-    #                                                                              "selectingLayer": 1}],
-    #                                                                output_name='tmpParcelSolar', context=context)
-
     # 00:00:58.528 - withinDistance 0.1 feet find_locations
     selected_buildable_layer = find_locations.derive_new_locations(input_layers=[buildableLyr, inputParcelsLyr],
                                                                    expressions=[{"operator": "and",
