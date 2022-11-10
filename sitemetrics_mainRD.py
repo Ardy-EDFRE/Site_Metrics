@@ -107,8 +107,11 @@ try:
 
     raster_inputs = {
         "Forests_Only_From_LANDFIRE":  "Forest",
-        'Slope_over10perc_ned2usa_60m': "Slp10"
+        'Slope_over10perc_ned2usa_60m': "Slp10",
+        "Soil_Bedrock_Depth_1_to_100cm_rc1_nogaps": 'BdRk_1_to_100cm',
+        "Soil_Bedrock_Depth_101_to_300cm_rc1_nogaps": 'BdRk_101_to_300cm'
     }
+
     vectorParams = namedtuple("vectorParams", "vectorItemName field whereClause")
     vector_inputs = {
         "FEMA100": vectorParams("FEMA Flood Hazard Areas", 'F100', "FLD_ZONE in ('A', 'A99', 'AE', 'AH', 'AO')"),
@@ -274,6 +277,9 @@ try:
     arcpy.AddMessage("Cleaning up final table")
 
     # store all the results in a list with dataframes
+    for result in resultList:
+        if result.getMessage(4) == 'Failed.':
+            resultList.remove(result)
     for result in resultList:
         d = json.loads(result.getOutput(0).JSON)  # response from gp calls as JSON
         df = pd.json_normalize(d, record_path=['features'])  # dataframe created from JSON
