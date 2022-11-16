@@ -13,11 +13,11 @@ import json
 import time
 from uuid import uuid4
 
-# Permanently changes the pandas settings
-pd.set_option('display.max_rows', None)
-pd.set_option('display.max_columns', None)
-pd.set_option('display.width', None)
-pd.set_option('display.max_colwidth', -1)
+# # Permanently changes the pandas settings
+# pd.set_option('display.max_rows', None)
+# pd.set_option('display.max_columns', None)
+# pd.set_option('display.width', None)
+# pd.set_option('display.max_colwidth', -1)
 
 def mapParcelIDandRunIDFields(inParcels, inParcelsIDField):
     runID = str(uuid4())
@@ -89,9 +89,7 @@ try:
     # inParcels = r"G:\Users\Ardy\GIS\APRX\scratch.gdb\test_polys_nozm"
     # inParcels = r"G:\Users\Ardy\GIS\APRX\scratch.gdb\test_parcels_FEMA"
     # inParcels = r"G:\Users\JoseLuis\arcgis_scripts_enxco\site_metrics\test_parcels_FEMA.shp"
-
     # inParcels = r"G:\Projects\USA_West\Flores\05_GIS\053_Data\Parcels_Flores_CoreLogic_ToLoad_LPM_20221024.shp"
-    # ID_FIELD_PARCELS_SDF = 'FID'
     # debug only end  *****************************
 
 
@@ -109,18 +107,23 @@ try:
     # Slp10_BL_Acres     # Forest_BL_Acres        # BdRckSh_BL_Acres    # BdRckMD_BL_Acres
     # Slp10_BL_Pcnt      # Forest_BL_Pcnt         # BdRckSh_BL_Pcnt     # BdRckMD_BL_Pcnt
 
-    raster_inputs = {
-        "Forests_Only_From_LANDFIRE":  "Forest",
-        'Slope_over10perc_ned2usa_60m': "Slp10"
-    }
-    vectorParams = namedtuple("vectorParams", "vectorItemName field whereClause")
-    vector_inputs = {
-        "FEMA100": vectorParams("FEMA Flood Hazard Areas", 'F100', "FLD_ZONE in ('A', 'A99', 'AE', 'AH', 'AO')"),
-        # "FEMA500": vectorParams("FEMA Flood Hazard Areas", 'F500', "FLD_ZONE in ('X')")
-    }
+    rasterParams = namedtuple("rasterParams", "name id field")
+    raster_inputs = [
+        rasterParams('Forests_Only_From_LANDFIRE', 'ab97639707a846df87f7a2b6f4a91704', 'Forest'),
+        rasterParams('Slope_over10perc_ned2usa_60m', '7136a66ef63148f69f2bf963a0778ce9', 'Slp10'),
+        rasterParams('Soil_Bedrock_Depth_1_to_100cm_rc1_nogaps', '58d9638faa9f48f681e286cab4218402', 'BdRckSh'),
+        rasterParams('Soil_Bedrock_Depth_101_to_300cm_rc1_nogaps', 'b13310e293b844c3a18c56d1712d8f2c', 'BdRckMD')
+    ]
+    vectorParams = namedtuple("vectorParams", "name id field whereClause")
+    vector_inputs = [
+        vectorParams("FEMA Flood Hazard Areas", '1a58e6becd2d4ba4bb8c401997bebe29', 'F100', "FLD_ZONE in ('A', 'A99', 'AE', 'AH', 'AO')"),
+        vectorParams("FEMA Flood Hazard Areas", '1a58e6becd2d4ba4bb8c401997bebe29', 'F500', "FLD_ZONE in ('X')")
+    ]
 
-    # raster_service_inputs = ['Forests_Only_From_LANDFIRE', 'Slope_over10perc_ned2usa_60m']
-    # vector_service_inputs = ['1a58e6becd2d4ba4bb8c401997bebe29']
+    # vector_inputs = {
+    #     "FEMA100": vectorParams("FEMA Flood Hazard Areas", '1a58e6becd2d4ba4bb8c401997bebe29','F100', "FLD_ZONE in ('A', 'A99', 'AE', 'AH', 'AO')"),
+    #     # "FEMA500": vectorParams("FEMA Flood Hazard Areas", '1a58e6becd2d4ba4bb8c401997bebe29', 'F500', "FLD_ZONE in ('X')")
+    # }
 
     inParcels = arcpy.FeatureSet(inParcels)
 
@@ -144,12 +147,12 @@ try:
     gis = GIS("https:??geoportal.edf-re.com?portal".replace(':??', '://').replace('?', '/'),
               "Geoportalcreator", "secret1creator**")
 
-    # find the solar national buildable land layer
+    # find the solar national buildable land layer (National Solar Buildable Land)
     buildableItem = gis.content.get('21d180c3e40847a69c32cec4166fbeca')
     buildableLyr = buildableItem.layers[0]
 
-    # find the site metric parcels layer
-    inputParcelsItem = gis.content.search('site_metrics_inputParcels', 'feature layer')[0]
+    # find the site metric parcels layer (site_metrics_inputParcels)
+    inputParcelsItem = gis.content.get('a9ac200342824bcd8626dbe9f816ef4d')
     inputParcelsLyr = inputParcelsItem.layers[0]
 
     inParcelsDesc = arcpy.Describe(inParcels)
@@ -171,7 +174,7 @@ try:
     # intersecting buildable lands polys into a (new or preexisting) geoportal layer
     # https://developers.arcgis.com/python/api-reference/arcgis.features.find_locations.html
     try:
-        parcel_bld_item = gis.content.search('tmpParcelSolar', 'feature layer')[0]
+        parcel_bld_item = gis.content.get('d2873bf79fb841cf98c56dd1cc41d242')  # tmpParcelSolar
         parcel_bld_item.delete()
     except Exception as e:
         print('tmpParcelSolar does not exist yet')
@@ -197,7 +200,7 @@ try:
 
     # gis.content.search is for name specific & gis.content.get is for item id specific
     try:
-        parcels_item = gis.content.search('sitemetrics_parcels_buildable_union')[0]
+        parcels_item = gis.content.get('5e99836d8d0d46f1b73030c4129da6c5')  # sitemetrics_parcels_buildable_union
         parcels_item.delete()
     except Exception as e:
         print('sitemetrics_parcels_buildable_union does not exist yet')
@@ -266,22 +269,20 @@ try:
     resultList = []
     # Make raster calls
     for tmp_raster in raster_inputs:
-        tmpFieldPrefix = raster_inputs[tmp_raster]
         tmp_raster_result = arcpy.getAcresAndPercRaster.getAcresAndPercRaster(parcelsBuildableUnionLayerName,
                                                                               tmp_run_id,
                                                                               ID_FIELD_PARCELS_GEOPORTAL, ID_FIELD_BLD_PARCELS_GEOPORTAL,
                                                                               'Area in Square Miles',
-                                                                              tmp_raster, tmpFieldPrefix)
+                                                                              tmp_raster.id, tmp_raster.field)
         resultList.append(tmp_raster_result)
 
     arcpy.AddMessage("Making Vector Calls")
     # Make vector calls
     for tmp_vector in vector_inputs:
-        tmpVectorItem = vector_inputs[tmp_vector]
         tmp_vector_result = arcpy.getAcresAndPercVector.getAcresAndPercVector(parcelsBuildableUnionLayerName,
                                                                               tmp_run_id,
                                                                               ID_FIELD_PARCELS_GEOPORTAL, ID_FIELD_BLD_PARCELS_GEOPORTAL,
-                                                                              tmpVectorItem.vectorItemName, tmpVectorItem.field, tmpVectorItem.whereClause)
+                                                                              tmp_vector.id, tmp_vector.field, tmp_vector.whereClause)
         resultList.append(tmp_vector_result)
 
     # Wait for all the calls to be processed
