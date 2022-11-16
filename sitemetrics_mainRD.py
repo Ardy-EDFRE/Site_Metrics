@@ -1,4 +1,4 @@
-import os
+import sys
 import arcpy
 from collections import namedtuple
 from arcgis.gis import GIS
@@ -92,7 +92,6 @@ try:
     # inParcels = r"G:\Projects\USA_West\Flores\05_GIS\053_Data\Parcels_Flores_CoreLogic_ToLoad_LPM_20221024.shp"
     # debug only end  *****************************
 
-
     # the BL_Source is always the Solar national
 
     # Buildable Land # FEMA 100 Year Floodplain  # 500 Year Floodplain
@@ -117,13 +116,8 @@ try:
     vectorParams = namedtuple("vectorParams", "name id field whereClause")
     vector_inputs = [
         vectorParams("FEMA Flood Hazard Areas", '1a58e6becd2d4ba4bb8c401997bebe29', 'F100', "FLD_ZONE in ('A', 'A99', 'AE', 'AH', 'AO')"),
-        vectorParams("FEMA Flood Hazard Areas", '1a58e6becd2d4ba4bb8c401997bebe29', 'F500', "FLD_ZONE in ('X')")
+        # vectorParams("FEMA Flood Hazard Areas", '1a58e6becd2d4ba4bb8c401997bebe29', 'F500', "FLD_ZONE in ('X')")
     ]
-
-    # vector_inputs = {
-    #     "FEMA100": vectorParams("FEMA Flood Hazard Areas", '1a58e6becd2d4ba4bb8c401997bebe29','F100', "FLD_ZONE in ('A', 'A99', 'AE', 'AH', 'AO')"),
-    #     # "FEMA500": vectorParams("FEMA Flood Hazard Areas", '1a58e6becd2d4ba4bb8c401997bebe29', 'F500', "FLD_ZONE in ('X')")
-    # }
 
     inParcels = arcpy.FeatureSet(inParcels)
 
@@ -174,7 +168,7 @@ try:
     # intersecting buildable lands polys into a (new or preexisting) geoportal layer
     # https://developers.arcgis.com/python/api-reference/arcgis.features.find_locations.html
     try:
-        parcel_bld_item = gis.content.get('d2873bf79fb841cf98c56dd1cc41d242')  # tmpParcelSolar
+        parcel_bld_item = gis.content.search('tmpParcelSolar', 'feature layer')[0]  # tmpParcelSolar
         parcel_bld_item.delete()
     except Exception as e:
         print('tmpParcelSolar does not exist yet')
@@ -200,7 +194,7 @@ try:
 
     # gis.content.search is for name specific & gis.content.get is for item id specific
     try:
-        parcels_item = gis.content.get('5e99836d8d0d46f1b73030c4129da6c5')  # sitemetrics_parcels_buildable_union
+        parcels_item = gis.content.search(parcelsBuildableUnionLayerName, 'feature layer')[0]  # sitemetrics_parcels_buildable_union
         parcels_item.delete()
     except Exception as e:
         print('sitemetrics_parcels_buildable_union does not exist yet')
@@ -317,8 +311,8 @@ try:
     # join the final statists table with the input parcels
     arcpy.AddMessage("Joining stats tables to geometries")
     final_stats_table_merge[ID_FIELD_PARCELS_GEOPORTAL] = final_stats_table_merge[ID_FIELD_PARCELS_GEOPORTAL].astype('int')
-    parcelsWithStatsSDF = parcelsSDF.merge(final_stats_table_merge, left_on=ID_FIELD_PARCELS_SDF,
-                                           right_on=ID_FIELD_PARCELS_GEOPORTAL)
+    parcelsWithStatsSDF = final_stats_table_merge.merge(parcelsSDF, left_on=ID_FIELD_PARCELS_GEOPORTAL,
+                                           right_on=ID_FIELD_PARCELS_SDF)
 
     # return the statistics recordset
     arcpy.AddMessage("Creating final record set")
