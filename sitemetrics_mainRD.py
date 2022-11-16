@@ -1,4 +1,4 @@
-import os, sys
+import os
 import arcpy
 from collections import namedtuple
 from arcgis.gis import GIS
@@ -13,6 +13,11 @@ import json
 import time
 from uuid import uuid4
 
+# Permanently changes the pandas settings
+pd.set_option('display.max_rows', None)
+pd.set_option('display.max_columns', None)
+pd.set_option('display.width', None)
+pd.set_option('display.max_colwidth', -1)
 
 def mapParcelIDandRunIDFields(inParcels, inParcelsIDField):
     runID = str(uuid4())
@@ -79,17 +84,16 @@ def createInAndOutBuildableField(unionFLyr):
 
 try:
     inParcels = arcpy.GetParameter(0)
-    idFieldNameParcels = arcpy.GetParameterAsText(1)
 
     # debug only  *****************************
     # inParcels = r"G:\Users\Ardy\GIS\APRX\scratch.gdb\test_polys_nozm"
     # inParcels = r"G:\Users\Ardy\GIS\APRX\scratch.gdb\test_parcels_FEMA"
-    # idFieldNameParcels = 'parcelid'
+    # inParcels = r"G:\Users\JoseLuis\arcgis_scripts_enxco\site_metrics\test_parcels_FEMA.shp"
+
     # inParcels = r"G:\Projects\USA_West\Flores\05_GIS\053_Data\Parcels_Flores_CoreLogic_ToLoad_LPM_20221024.shp"
-    # idFieldNameParcels = 'FID'
+    # ID_FIELD_PARCELS_SDF = 'FID'
     # debug only end  *****************************
 
-    idFieldNameBldParcels = 'parcel_bld_id'
 
     # the BL_Source is always the Solar national
 
@@ -107,16 +111,16 @@ try:
 
     raster_inputs = {
         "Forests_Only_From_LANDFIRE":  "Forest",
-        'Slope_over10perc_ned2usa_60m': "Slp10",
-        "Soil_Bedrock_Depth_1_to_100cm_rc1_nogaps": 'BdRk_1_to_100cm',
-        "Soil_Bedrock_Depth_101_to_300cm_rc1_nogaps": 'BdRk_101_to_300cm'
+        'Slope_over10perc_ned2usa_60m': "Slp10"
     }
-
     vectorParams = namedtuple("vectorParams", "vectorItemName field whereClause")
     vector_inputs = {
         "FEMA100": vectorParams("FEMA Flood Hazard Areas", 'F100', "FLD_ZONE in ('A', 'A99', 'AE', 'AH', 'AO')"),
-        "FEMA500": vectorParams("FEMA Flood Hazard Areas", 'F500', "FLD_ZONE in ('X')")
+        # "FEMA500": vectorParams("FEMA Flood Hazard Areas", 'F500', "FLD_ZONE in ('X')")
     }
+
+    # raster_service_inputs = ['Forests_Only_From_LANDFIRE', 'Slope_over10perc_ned2usa_60m']
+    # vector_service_inputs = ['1a58e6becd2d4ba4bb8c401997bebe29']
 
     inParcels = arcpy.FeatureSet(inParcels)
 
@@ -125,8 +129,13 @@ try:
     parcelsSDF = pd.DataFrame.spatial.from_featureclass('memory/tmp1')
     arcpy.Delete_management('memory/tmp1')
 
-    if type(parcelsSDF[idFieldNameParcels]) == 'Str':
-        parcelsSDF[idFieldNameParcels] = parcelsSDF[idFieldNameParcels].astype('int')
+    # main fields for identify parcels 
+    ID_FIELD_PARCELS_SDF = 'OBJECTID'
+    ID_FIELD_PARCELS_GEOPORTAL = 'parcelid'
+    ID_FIELD_BLD_PARCELS_GEOPORTAL = 'parcel_bld_id'
+
+    if type(parcelsSDF[ID_FIELD_PARCELS_SDF]) == 'Str':
+        parcelsSDF[ID_FIELD_PARCELS_SDF] = parcelsSDF[ID_FIELD_PARCELS_SDF].astype('int')
 
     parcelsBuildableUnionLayerName = "sitemetrics_parcels_buildable_union"
 
@@ -157,7 +166,7 @@ try:
     # Intersect buildable and parcels in geoportal
     inputParcelsLyr.delete_features(where="1 = 1")
 
-    inputParcelsLyr = uploadFeaturesToGeoportalLyr(inParcels, inputParcelsLyr, idFieldNameParcels)
+    inputParcelsLyr = uploadFeaturesToGeoportalLyr(inParcels, inputParcelsLyr, ID_FIELD_PARCELS_SDF)
 
     # intersecting buildable lands polys into a (new or preexisting) geoportal layer
     # https://developers.arcgis.com/python/api-reference/arcgis.features.find_locations.html
@@ -168,6 +177,14 @@ try:
         print('tmpParcelSolar does not exist yet')
 
     arcpy.AddMessage("Uploading parcels")
+    # 00:00:58.45 seconds - intersect find_locations
+    # find_locations - derive_new_locations returns partial feature records vs find_existing_locations was returning a much larger area
+    # selected_buildable_layer = find_locations.derive_new_locations(input_layers=[buildableLyr, inputParcelsLyr],
+    #                                                                expressions=[{"operator": "and", "layer": 0,
+    #                                                                              "spatialRel": "intersects",
+    #                                                                              "selectingLayer": 1}],
+    #                                                                output_name='tmpParcelSolar', context=context)
+
     # 00:00:58.528 - withinDistance 0.1 feet find_locations
     selected_buildable_layer = find_locations.derive_new_locations(input_layers=[buildableLyr, inputParcelsLyr],
                                                                    expressions=[{"operator": "and",
@@ -215,16 +232,20 @@ try:
 
     df_list = []
     # summarize area by parcelid and then by parcel_bld_id
-    parcelBuildableAcres = tmp_parcel_df.groupby([idFieldNameParcels]).analysisarea.sum()
+    parcelBuildableAcres = tmp_parcel_df.groupby([ID_FIELD_PARCELS_GEOPORTAL]).analysisarea.sum()
     parcelBuildableAcres = parcelBuildableAcres.to_frame()
-    # df_list.append(parcelBuildableAcres)
+    parcelBuildableAcres.rename(columns={"analysisarea": "Acres"}, inplace=True)
+    # convert sq miles to acres
+    parcelBuildableAcres['Acres'] = parcelBuildableAcres['Acres'].multiply(640)
+    df_list.append(parcelBuildableAcres)
 
     # summarize area by parcelsBuildableUnionIDField
-    summarize_df = tmp_parcel_df.groupby([idFieldNameParcels, idFieldNameBldParcels]).analysisarea.sum().reset_index()
+    summarize_df = tmp_parcel_df.groupby([ID_FIELD_PARCELS_GEOPORTAL, ID_FIELD_BLD_PARCELS_GEOPORTAL]).analysisarea.sum().reset_index()
+    summarize_df['analysisarea'] = summarize_df['analysisarea'].multiply(640)
 
     # pivot table to convert parcelsBuildableUnionIDField to parcelid
-    summarize_df['buildableIndex'] = summarize_df[idFieldNameBldParcels].str[-1:]
-    tmp_pivot_table = summarize_df.pivot_table(index=idFieldNameParcels, columns='buildableIndex',
+    summarize_df['buildableIndex'] = summarize_df[ID_FIELD_BLD_PARCELS_GEOPORTAL].str[-1:]
+    tmp_pivot_table = summarize_df.pivot_table(index=ID_FIELD_PARCELS_GEOPORTAL, columns='buildableIndex',
                                                values='analysisarea')
     tmp_pivot_table.reset_index(inplace=True)
     tmp_pivot_table.rename(
@@ -248,7 +269,7 @@ try:
         tmpFieldPrefix = raster_inputs[tmp_raster]
         tmp_raster_result = arcpy.getAcresAndPercRaster.getAcresAndPercRaster(parcelsBuildableUnionLayerName,
                                                                               tmp_run_id,
-                                                                              idFieldNameParcels, idFieldNameBldParcels,
+                                                                              ID_FIELD_PARCELS_GEOPORTAL, ID_FIELD_BLD_PARCELS_GEOPORTAL,
                                                                               'Area in Square Miles',
                                                                               tmp_raster, tmpFieldPrefix)
         resultList.append(tmp_raster_result)
@@ -259,7 +280,7 @@ try:
         tmpVectorItem = vector_inputs[tmp_vector]
         tmp_vector_result = arcpy.getAcresAndPercVector.getAcresAndPercVector(parcelsBuildableUnionLayerName,
                                                                               tmp_run_id,
-                                                                              idFieldNameParcels, idFieldNameBldParcels,
+                                                                              ID_FIELD_PARCELS_GEOPORTAL, ID_FIELD_BLD_PARCELS_GEOPORTAL,
                                                                               tmpVectorItem.vectorItemName, tmpVectorItem.field, tmpVectorItem.whereClause)
         resultList.append(tmp_vector_result)
 
@@ -274,30 +295,29 @@ try:
                 sys.exit()
 
     # This is added to get the resultOutputs from our gp results list to a record set
-    arcpy.AddMessage("Cleaning up final table")
+    arcpy.AddMessage("All stats have been calculated")
 
     # store all the results in a list with dataframes
-    for result in resultList:
-        if result.getMessage(4) == 'Failed.':
-            resultList.remove(result)
+    arcpy.AddMessage("Cleaning stats tables")
     for result in resultList:
         d = json.loads(result.getOutput(0).JSON)  # response from gp calls as JSON
         df = pd.json_normalize(d, record_path=['features'])  # dataframe created from JSON
+        # remove the attributes. prefix and the OBJECTID attribute
+        df.columns = df.columns.str.lstrip('attributes.')
+        df = df.drop(['OBJECTID'], axis=1, errors='ignore')
         df_list.append(df)
 
-    # join all the tables at once because they are in a list
-    # fix concat to join function
-    final_stats_table_merge = pd.concat(df_list, axis=1)
-    final_stats_table_merge.reset_index(inplace=True)
-    final_stats_table_merge.columns = final_stats_table_merge.columns.str.replace('attributes.',
-                                                                                  '')  # JSON is converted but has attributes.something when creating columns in dataframe
-    final_stats_table_merge = final_stats_table_merge.T.drop_duplicates().T  # Dropping duplicate OBJECTID & ParcelID columns
+    # join all the stats tables
+    arcpy.AddMessage("Joining stats tables")
+    final_stats_table_merge = df_list[0]
+    for df_i in df_list[1:]:
+        final_stats_table_merge = final_stats_table_merge.merge(df_i, on=ID_FIELD_PARCELS_GEOPORTAL, how='outer')
 
     # join the final statists table with the input parcels
-    final_stats_table_merge = final_stats_table_merge.join(parcelBuildableAcres, on=idFieldNameParcels)
-    final_stats_table_merge[idFieldNameParcels] = final_stats_table_merge[idFieldNameParcels].astype('int')
-    parcelsWithStatsSDF = parcelsSDF.merge(final_stats_table_merge, left_on=idFieldNameParcels,
-                                           right_on=idFieldNameParcels)
+    arcpy.AddMessage("Joining stats tables to geometries")
+    final_stats_table_merge[ID_FIELD_PARCELS_GEOPORTAL] = final_stats_table_merge[ID_FIELD_PARCELS_GEOPORTAL].astype('int')
+    parcelsWithStatsSDF = parcelsSDF.merge(final_stats_table_merge, left_on=ID_FIELD_PARCELS_SDF,
+                                           right_on=ID_FIELD_PARCELS_GEOPORTAL)
 
     # return the statistics recordset
     arcpy.AddMessage("Creating final record set")
@@ -306,11 +326,8 @@ try:
     inParcelsWithStats_arcpyfset.load(inParcelsWithStats_arcgisfset)
     arcpy.SetParameter(2, inParcelsWithStats_arcpyfset)
 
-    # elapsed_time = time.time() - tool_run_time
-    # timeString = time.strftime('%H:%M:%S' + str(round(elapsed_time % 1, 3))[1:], time.gmtime(elapsed_time))
-    # arcpy.AddMessage(timeString)
-
-    arcpy.AddMessage("Success")
+    textResponse = f"### SITE METRICS COMPLETED SUCCESSFULLY BECAUSE I ROCK ###"
+    arcpy.AddMessage(textResponse)
 
 except arcpy.ExecuteError:
     print('-1-')
