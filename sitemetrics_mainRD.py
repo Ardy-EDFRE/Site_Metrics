@@ -1,4 +1,6 @@
 import sys
+import datetime
+
 import arcpy
 from collections import namedtuple
 from arcgis.gis import GIS
@@ -89,7 +91,8 @@ try:
     # inParcels = r"G:\Users\Ardy\GIS\APRX\scratch.gdb\test_polys_nozm"
     # inParcels = r"G:\Users\Ardy\GIS\APRX\scratch.gdb\test_parcels_FEMA"
     # inParcels = r"G:\Users\JoseLuis\arcgis_scripts_enxco\site_metrics\test_parcels_FEMA.shp"
-    # inParcels = r"G:\Projects\USA_West\Flores\05_GIS\053_Data\Parcels_Flores_CoreLogic_ToLoad_LPM_20221024.shp"
+    # inParcels = r"G:\Users\JoseLuis\arcgis_scripts_enxco\site_metrics\Default.gdb\test_parcels_FEMA_v2"
+    # inParcels = r"G:\Projects\USA_West\Flores\05_GIS\053_Data\Parcels_Flores_CoreLogic_TojLoad_LPM_20221024.shp"
     # debug only end  *****************************
 
     # the BL_Source is always the Solar national
@@ -116,10 +119,14 @@ try:
     vectorParams = namedtuple("vectorParams", "name id field whereClause")
     vector_inputs = [
         vectorParams("FEMA Flood Hazard Areas", '1a58e6becd2d4ba4bb8c401997bebe29', 'F100', "FLD_ZONE in ('A', 'A99', 'AE', 'AH', 'AO')"),
-        # vectorParams("FEMA Flood Hazard Areas", '1a58e6becd2d4ba4bb8c401997bebe29', 'F500', "FLD_ZONE in ('X')")
+        vectorParams("FEMA Flood Hazard Areas", '1a58e6becd2d4ba4bb8c401997bebe29', 'F500', "FLD_ZONE in ('X')")
     ]
 
-    inParcels = arcpy.FeatureSet(inParcels)
+
+    # inParcels = arcpy.FeatureSet(inParcels)
+    # in case the OBJECTIDs are not starting at 1
+    fc = arcpy.CopyFeatures_management(inParcels, 'in_memory/fc')
+    inParcels = arcpy.FeatureSet(fc)
 
     # converting the inParcels featureset to a spatial dataframe. We will join the stats to parcelsSDF
     arcpy.CopyFeatures_management(inParcels, 'memory/tmp1')
@@ -141,6 +148,8 @@ try:
     gis = GIS("https:??geoportal.edf-re.com?portal".replace(':??', '://').replace('?', '/'),
               "Geoportalcreator", "secret1creator**")
 
+    arcpy.AddMessage("Fecthing geoportal solar buildable land and holder for parcels")
+    t0 = time.time()
     # find the solar national buildable land layer (National Solar Buildable Land)
     buildableItem = gis.content.get('21d180c3e40847a69c32cec4166fbeca')
     buildableLyr = buildableItem.layers[0]
@@ -148,6 +157,8 @@ try:
     # find the site metric parcels layer (site_metrics_inputParcels)
     inputParcelsItem = gis.content.get('a9ac200342824bcd8626dbe9f816ef4d')
     inputParcelsLyr = inputParcelsItem.layers[0]
+    t1 = time.time()
+    arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1-t0)}")
 
     inParcelsDesc = arcpy.Describe(inParcels)
     inParcelsExtent = inParcelsDesc.extent
@@ -161,9 +172,17 @@ try:
                }
 
     # Intersect buildable and parcels in geoportal
+    arcpy.AddMessage("Deleting old parcels in the geoportal layer ")
+    t0 = time.time()
     inputParcelsLyr.delete_features(where="1 = 1")
+    t1 = time.time()
+    arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1-t0)}")
 
+    arcpy.AddMessage("Uploading parcels to geoportal")
+    t0 = time.time()
     inputParcelsLyr = uploadFeaturesToGeoportalLyr(inParcels, inputParcelsLyr, ID_FIELD_PARCELS_SDF)
+    t1 = time.time()
+    arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1 - t0)}")
 
     # intersecting buildable lands polys into a (new or preexisting) geoportal layer
     # https://developers.arcgis.com/python/api-reference/arcgis.features.find_locations.html
@@ -171,9 +190,10 @@ try:
         parcel_bld_item = gis.content.search('tmpParcelSolar', 'feature layer')[0]  # tmpParcelSolar
         parcel_bld_item.delete()
     except Exception as e:
-        print('tmpParcelSolar does not exist yet')
+        arcpy.AddMessage('tmpParcelSolar does not exist yet')
 
-    arcpy.AddMessage("Uploading parcels")
+    arcpy.AddMessage("Selecting intersecting buildable features into a new geoportal layer")
+    t0 = time.time()
     # 00:00:58.45 seconds - intersect find_locations
     # find_locations - derive_new_locations returns partial feature records vs find_existing_locations was returning a much larger area
     # selected_buildable_layer = find_locations.derive_new_locations(input_layers=[buildableLyr, inputParcelsLyr],
@@ -191,22 +211,31 @@ try:
                                                                                  "distance": 0.001,
                                                                                  "units": "feet"}],
                                                                    output_name='tmpParcelSolar', context=context)
+    t1 = time.time()
+    arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1 - t0)}")
 
     # gis.content.search is for name specific & gis.content.get is for item id specific
     try:
         parcels_item = gis.content.search(parcelsBuildableUnionLayerName, 'feature layer')[0]  # sitemetrics_parcels_buildable_union
         parcels_item.delete()
     except Exception as e:
-        print('sitemetrics_parcels_buildable_union does not exist yet')
+        arcpy.AddMessage('sitemetrics_parcels_buildable_union does not exist yet')
 
     arcpy.AddMessage("Unionising parcels with solar national buildable land")
+    t0 = time.time()
     unionItem = overlay_layers(inputParcelsLyr, selected_buildable_layer, overlay_type='Union',
                                output_name=parcelsBuildableUnionLayerName, context=context)
+    t1 = time.time()
+    arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1 - t0)}")
 
     unionFLyr = unionItem.layers[0]
 
+    arcpy.AddMessage("Removing buildable land outside the parcels")
+    t0 = time.time()
     # remove any parcels outside of union EXAMPLE: "parcelid = -1"
     unionFLyr.delete_features(where="parcelid = ''")
+    t1 = time.time()
+    arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1 - t0)}")
 
     # modify parcelid If fid_feature_set  is -1 then parcelid = parcelid_0 otherwise parcelid  = parcelid_1)
     # add new parcelid field for identifying within buildable (parcel_bld_id)
@@ -260,6 +289,7 @@ try:
     arcpy.ImportToolbox(vectorToolbox)
 
     arcpy.AddMessage("Making Raster Calls")
+    t0 = time.time()
     resultList = []
     # Make raster calls
     for tmp_raster in raster_inputs:
@@ -290,8 +320,10 @@ try:
                 sys.exit()
 
     # This is added to get the resultOutputs from our gp results list to a record set
-    arcpy.AddMessage("All stats have been calculated")
+    t1 = time.time()
+    arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1 - t0)}")
 
+    t0 = time.time()
     # store all the results in a list with dataframes
     arcpy.AddMessage("Cleaning stats tables")
     for result in resultList:
@@ -302,37 +334,56 @@ try:
         df = df.drop(['OBJECTID'], axis=1, errors='ignore')
         df_list.append(df)
 
+    t1 = time.time()
+    arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1 - t0)}")
+
     # join all the stats tables
+    t0 = time.time()
+
     arcpy.AddMessage("Joining stats tables")
     final_stats_table_merge = df_list[0]
     for df_i in df_list[1:]:
         final_stats_table_merge = final_stats_table_merge.merge(df_i, on=ID_FIELD_PARCELS_GEOPORTAL, how='outer')
 
+    t1 = time.time()
+    arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1 - t0)}")
+
     # join the final statists table with the input parcels
+    t0 = time.time()
+
     arcpy.AddMessage("Joining stats tables to geometries")
     final_stats_table_merge[ID_FIELD_PARCELS_GEOPORTAL] = final_stats_table_merge[ID_FIELD_PARCELS_GEOPORTAL].astype('int')
-    parcelsWithStatsSDF = final_stats_table_merge.merge(parcelsSDF, left_on=ID_FIELD_PARCELS_GEOPORTAL,
-                                           right_on=ID_FIELD_PARCELS_SDF)
+    parcelsWithStatsSDF = parcelsSDF.merge(final_stats_table_merge, left_on=ID_FIELD_PARCELS_SDF,
+                                                        right_on=ID_FIELD_PARCELS_GEOPORTAL)
+
+    t1 = time.time()
+    arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1 - t0)}")
 
     # return the statistics recordset
+    t0 = time.time()
+
     arcpy.AddMessage("Creating final record set")
     inParcelsWithStats_arcpyfset = arcpy.FeatureSet()
     inParcelsWithStats_arcgisfset = parcelsWithStatsSDF.spatial.to_featureset()
     inParcelsWithStats_arcpyfset.load(inParcelsWithStats_arcgisfset)
-    arcpy.SetParameter(2, inParcelsWithStats_arcpyfset)
+    arcpy.SetParameter(1, inParcelsWithStats_arcpyfset)
+
+    t1 = time.time()
+    arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1 - t0)}")
 
     textResponse = f"### SITE METRICS COMPLETED SUCCESSFULLY BECAUSE I ROCK ###"
     arcpy.AddMessage(textResponse)
+    arcpy.SetParameterAsText(2, textResponse)
 
 except arcpy.ExecuteError:
-    print('-1-')
-    print(arcpy.GetMessages(1))
-    print('-2-')
-    print(arcpy.GetMessages(2))
+    arcpy.AddMessage('-1-')
+    arcpy.AddMessage(arcpy.GetMessages(1))
+    arcpy.AddMessage('-2-')
+    arcpy.AddMessage(arcpy.GetMessages(2))
     arcpy.AddError('-1-')
     arcpy.AddError(arcpy.GetMessages(1))
     arcpy.AddError('-2-')
     arcpy.AddError(arcpy.GetMessages(2))
 except Exception as e:
-    print(e)
+    arcpy.AddMessage(e)
     arcpy.AddError(e)
