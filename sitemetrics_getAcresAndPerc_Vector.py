@@ -12,14 +12,16 @@ try:
     vectorItemName = arcpy.GetParameterAsText(4)
     vectorFieldPrefix = arcpy.GetParameterAsText(5)
     vectorWhereClause = arcpy.GetParameterAsText(6)
+
     # # ###    # debug only  *****************************
-    # parcelsBuildableUnionItemName = 'sitemetrics_parcels_buildable_union'
+    # parcelsBuildableUnionItemName = 'sitemetrics_parcels_buildable_union'  # Not possible to use the ID because the layer is recreated every time the tool runs
     # runid = '30f92219-0bad-40f1-801a-0e1f52dbf9fd'
     # parcelsIDField = 'parcelid'
     # parcelsBuildableUnionIDField = 'parcel_bld_id'
-    # vectorItemName = '1a58e6becd2d4ba4bb8c401997bebe29'
+    # vectorItemName = '1db6910429d14a60bebae24cc87648d5'  # this is the fema as feature layer
+    # # vectorItemName = '1a58e6becd2d4ba4bb8c401997bebe29' # this is the fema as map image
     # vectorFieldPrefix = 'F500'
-    # # # vectorWhereClause = "FLD_ZONE in ('A', 'A99', 'AE', 'AH', 'AO')"
+    # # vectorWhereClause = "FLD_ZONE in ('A', 'A99', 'AE', 'AH', 'AO')"
     # vectorWhereClause = "FLD_ZONE in ('X')"
     # # vectorWhereClause = ''
 
@@ -51,11 +53,75 @@ try:
     # Selecting vector data
     if vectorWhereClause and vectorWhereClause != "":
         arcpy.AddMessage('Selecting vector data')
-        selected_vector_layer = find_locations.derive_new_locations(input_layers=[vectorLyr],
-                                                                    expressions=[{"operator": "", "layer": 0,
-                                                                                  "where": vectorWhereClause}],
-                                                                    context=context)
-        vectorLyr = selected_vector_layer
+        try:
+            selected_vector_layer = find_locations.derive_new_locations(input_layers=[vectorLyr],
+                                                                        expressions=[{"operator": "", "layer": 0,
+                                                                                      "where": vectorWhereClause}],
+                                                                        context=context)
+            vectorLyr = selected_vector_layer
+
+            # check that vectorLyr has features
+            featureSet_arcgis = vectorLyr.query()
+            if len(featureSet_arcgis.features) == 0:
+                raise Exception
+
+        except Exception as e:
+            print (e)
+            # return an empty dataset
+            data_json = f'''{{
+             "objectIdFieldName": "OBJECTID",
+             "fields": [
+              {{
+               "name": "OBJECTID", "alias": "OBJECTID", "type": "esriFieldTypeOID"
+              }},
+              {{
+               "name": "parcelid", "alias": "parcelid", "type": "esriFieldTypeString"
+              }},
+              {{
+               "name": '{vectorFieldPrefix}_Acres', "alias": '{vectorFieldPrefix}_Acres', "type": "esriFieldTypeInteger"
+              }},
+              {{
+               "name": '{vectorFieldPrefix}_BL_Acres', "alias": '{vectorFieldPrefix}_BL_Acres', "type": "esriFieldTypeInteger"
+              }},
+              {{
+               "name": '{vectorFieldPrefix}_Pcnt', "alias": '{vectorFieldPrefix}_Pcnt', "type": "esriFieldTypeInteger"
+              }},
+              {{
+               "name": '{vectorFieldPrefix}_BL_Pcnt', "alias": '{vectorFieldPrefix}_BL_Pcnt', "type": "esriFieldTypeInteger"
+              }}
+             ],
+             "features": [
+              {{
+               "attributes": {{
+                "OBJECTID": 1,
+                "parcelid": "1",
+                '{vectorFieldPrefix}_Acres': 0,
+                '{vectorFieldPrefix}_BL_Acres': 0,
+                '{vectorFieldPrefix}_Pcnt': 0,
+                '{vectorFieldPrefix}_BL_Pcnt': 0
+               }}
+              }}
+             ]
+            }}
+            '''
+
+            recSet = arcpy.RecordSet(data_json)
+
+            # set the responses
+            arcpy.SetParameter(7, recSet)
+            textResponse = f"### {vectorFieldPrefix} COMPLETED SUCCESSFULLY BECAUSE I ROCK ### "
+            arcpy.AddMessage(textResponse)
+            arcpy.SetParameterAsText(8, str(textResponse))
+            sys.exit()
+
+        #
+        # {"messageCode": "AO_100024",
+        #  "message": "There are no features provided for analysis in FEMA Flood Hazard Areas (100yr/500yr).",
+        #  "params": {"inputLayer": "FEMA Flood Hazard Areas (100yr/500yr)"}}
+        # {"messageCode": "AO_100049", "message": "There are no features in the processing extent for any input layers."}
+        # {"messageCode": "AO_100079", "message": "DeriveNewLocations failed."}
+        # Failed to execute(DeriveNewLocations).
+
     arcpy.AddMessage('Summarizing data')
 
     statsWithinParcelBld = summarize_within(sum_within_layer=zoneFLyr,

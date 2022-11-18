@@ -93,6 +93,9 @@ try:
     # inParcels = r"G:\Users\JoseLuis\arcgis_scripts_enxco\site_metrics\test_parcels_FEMA.shp"
     # inParcels = r"G:\Users\JoseLuis\arcgis_scripts_enxco\site_metrics\Default.gdb\test_parcels_FEMA_v2"
     # inParcels = r"G:\Projects\USA_West\Flores\05_GIS\053_Data\Parcels_Flores_CoreLogic_TojLoad_LPM_20221024.shp"
+    # inParcels = r'G:\Projects\USA_General\Siting_Tool_Development\Site_Metrics_Tool\Tests\Sample_Tract_Tests_20221115\Desktop_Outputs.gdb\WI_Solar_v03_TractID14285_Tract'
+    # inParcels = r'G:\Projects\USA_General\Siting_Tool_Development\Site_Metrics_Tool\Tests\Sample_Tract_Tests_20221115\Desktop_Outputs.gdb\OK_GRDA_v01_TractID1323_Tract'
+
     # debug only end  *****************************
 
     # the BL_Source is always the Solar national
@@ -118,10 +121,9 @@ try:
     ]
     vectorParams = namedtuple("vectorParams", "name id field whereClause")
     vector_inputs = [
-        vectorParams("FEMA Flood Hazard Areas", '1a58e6becd2d4ba4bb8c401997bebe29', 'F100', "FLD_ZONE in ('A', 'A99', 'AE', 'AH', 'AO')"),
-        vectorParams("FEMA Flood Hazard Areas", '1a58e6becd2d4ba4bb8c401997bebe29', 'F500', "FLD_ZONE in ('X')")
+        vectorParams("FEMA Flood Hazard Areas", '1db6910429d14a60bebae24cc87648d5', 'F100', "FLD_ZONE in ('A', 'A99', 'AE', 'AH', 'AO')"),
+        vectorParams("FEMA Flood Hazard Areas", '1db6910429d14a60bebae24cc87648d5', 'F500', "FLD_ZONE in ('X')")
     ]
-
 
     # inParcels = arcpy.FeatureSet(inParcels)
     # in case the OBJECTIDs are not starting at 1
@@ -303,7 +305,7 @@ try:
     arcpy.AddMessage("Making Vector Calls")
     # Make vector calls
     for tmp_vector in vector_inputs:
-        tmp_vector_result = arcpy.getAcresAndPercVector.getAcresAndPercVector(parcelsBuildableUnionLayerName,
+        tmp_vector_result = arcpy.getAcresAndPercVector.getAcresAndPercVector(unionItem.id,
                                                                               tmp_run_id,
                                                                               ID_FIELD_PARCELS_GEOPORTAL, ID_FIELD_BLD_PARCELS_GEOPORTAL,
                                                                               tmp_vector.id, tmp_vector.field, tmp_vector.whereClause)
