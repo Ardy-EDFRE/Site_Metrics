@@ -220,8 +220,7 @@ try:
 
     # gis.content.search is for name specific & gis.content.get is for item id specific
     try:
-        parcels_item = gis.content.search(parcelsBuildableUnionLayerName, 'feature layer')[
-            0]  # sitemetrics_parcels_buildable_union
+        parcels_item = gis.content.search(parcelsBuildableUnionLayerName, 'feature layer')[0]  # sitemetrics_parcels_buildable_union
         parcels_item.delete()
     except Exception as e:
         arcpy.AddMessage('sitemetrics_parcels_buildable_union_DEV does not exist yet')
@@ -271,8 +270,7 @@ try:
     df_list.append(parcelBuildableAcres)
 
     # summarize area by parcelsBuildableUnionIDField
-    summarize_df = tmp_parcel_df.groupby(
-        [ID_FIELD_PARCELS_GEOPORTAL, ID_FIELD_BLD_PARCELS_GEOPORTAL]).analysisarea.sum().reset_index()
+    summarize_df = tmp_parcel_df.groupby([ID_FIELD_PARCELS_GEOPORTAL, ID_FIELD_BLD_PARCELS_GEOPORTAL]).analysisarea.sum().reset_index()
     summarize_df['analysisarea'] = summarize_df['analysisarea'].multiply(640)
 
     # pivot table to convert parcelsBuildableUnionIDField to parcelid
@@ -304,7 +302,8 @@ try:
                                                                                     ID_FIELD_PARCELS_GEOPORTAL,
                                                                                     ID_FIELD_BLD_PARCELS_GEOPORTAL,
                                                                                     'Area in Square Miles',
-                                                                                    tmp_raster.id, tmp_raster.field)
+                                                                                    tmp_raster.id,
+                                                                                    tmp_raster.field)
         resultList.append(tmp_raster_result)
 
     arcpy.AddMessage("Making Vector Calls")
@@ -374,6 +373,9 @@ try:
 
     arcpy.AddMessage("Creating final record set")
     inParcelsWithStats_arcpyfset = arcpy.FeatureSet()
+    # This line is where the fail case happens of 'DataFrame' object has no attribute 'dtype'
+    # Pandas says this error occurs because Series is a dtype and DataFrame has dtypes
+    # https://github.com/Esri/arcgis-python-api/issues/1193 -- Similar to this error but no result
     inParcelsWithStats_arcgisfset = parcelsWithStatsSDF.spatial.to_featureset()
     inParcelsWithStats_arcpyfset.load(inParcelsWithStats_arcgisfset)
     arcpy.SetParameter(1, inParcelsWithStats_arcpyfset)

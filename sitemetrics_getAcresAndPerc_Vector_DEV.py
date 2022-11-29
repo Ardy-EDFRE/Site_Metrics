@@ -77,16 +77,16 @@ try:
                "name": "parcelid", "alias": "parcelid", "type": "esriFieldTypeString"
               }},
               {{
-               "name": '{vectorFieldPrefix}_Acres', "alias": '{vectorFieldPrefix}_Acres', "type": "esriFieldTypeInteger"
+               "name": '{vectorFieldPrefix}_Acres', "alias": '{vectorFieldPrefix}_Acres', "type": "esriFieldTypeDouble"
               }},
               {{
-               "name": '{vectorFieldPrefix}_BL_Acres', "alias": '{vectorFieldPrefix}_BL_Acres', "type": "esriFieldTypeInteger"
+               "name": '{vectorFieldPrefix}_BL_Acres', "alias": '{vectorFieldPrefix}_BL_Acres', "type": "esriFieldTypeDouble"
               }},
               {{
-               "name": '{vectorFieldPrefix}_Pcnt', "alias": '{vectorFieldPrefix}_Pcnt', "type": "esriFieldTypeInteger"
+               "name": '{vectorFieldPrefix}_Pcnt', "alias": '{vectorFieldPrefix}_Pcnt', "type": "esriFieldTypeDouble"
               }},
               {{
-               "name": '{vectorFieldPrefix}_BL_Pcnt', "alias": '{vectorFieldPrefix}_BL_Pcnt', "type": "esriFieldTypeInteger"
+               "name": '{vectorFieldPrefix}_BL_Pcnt', "alias": '{vectorFieldPrefix}_BL_Pcnt', "type": "esriFieldTypeDouble"
               }}
              ],
              "features": [
@@ -94,10 +94,10 @@ try:
                "attributes": {{
                 "OBJECTID": 1,
                 "parcelid": "1",
-                '{vectorFieldPrefix}_Acres': 0,
-                '{vectorFieldPrefix}_BL_Acres': 0,
-                '{vectorFieldPrefix}_Pcnt': 0,
-                '{vectorFieldPrefix}_BL_Pcnt': 0
+                '{vectorFieldPrefix}_Acres': 0.0,
+                '{vectorFieldPrefix}_BL_Acres': 0.0,
+                '{vectorFieldPrefix}_Pcnt': 0.0,
+                '{vectorFieldPrefix}_BL_Pcnt': 0.0
                }}
               }}
              ]
