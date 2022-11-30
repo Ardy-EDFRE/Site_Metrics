@@ -158,7 +158,7 @@ try:
     buildableItem = gis.content.get('21d180c3e40847a69c32cec4166fbeca')
     buildableLyr = buildableItem.layers[0]
 
-    # find the site metric parcels layer (site_metrics_inputParcels)
+    # find the site metric parcels layer (site_metrics_inputParcelsDEV)
     inputParcelsItem = gis.content.get('c52edce5c4324efea8383604903918ab')
     inputParcelsLyr = inputParcelsItem.layers[0]
     t1 = time.time()
@@ -373,9 +373,6 @@ try:
 
     arcpy.AddMessage("Creating final record set")
     inParcelsWithStats_arcpyfset = arcpy.FeatureSet()
-    # This line is where the fail case happens of 'DataFrame' object has no attribute 'dtype'
-    # Pandas says this error occurs because Series is a dtype and DataFrame has dtypes
-    # https://github.com/Esri/arcgis-python-api/issues/1193 -- Similar to this error but no result
     inParcelsWithStats_arcgisfset = parcelsWithStatsSDF.spatial.to_featureset()
     inParcelsWithStats_arcpyfset.load(inParcelsWithStats_arcgisfset)
     arcpy.SetParameter(1, inParcelsWithStats_arcpyfset)
