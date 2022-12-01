@@ -317,7 +317,7 @@ try:
         while tmp_result.status < 4:
             time.sleep(0.2)
             waitTime = time.time() - waitTimeStart
-            if waitTime > 120:
+            if waitTime > 1200:
                 arcpy.AddMessage(f"Error: map service not responding. {tmp_result}")
                 sys.exit()
 

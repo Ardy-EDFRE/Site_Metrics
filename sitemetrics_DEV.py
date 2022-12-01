@@ -1,6 +1,6 @@
 import sys
 import datetime
-
+import numpy as np
 import arcpy
 from collections import namedtuple
 from arcgis.gis import GIS
@@ -96,6 +96,7 @@ try:
     # inParcels = r"G:\Projects\USA_West\Flores\05_GIS\053_Data\Parcels_Flores_CoreLogic_TojLoad_LPM_20221024.shp"
     # inParcels = r'G:\Projects\USA_General\Siting_Tool_Development\Site_Metrics_Tool\Tests\Sample_Tract_Tests_20221115\Desktop_Outputs.gdb\WI_Solar_v03_TractID14285_Tract'
     # inParcels = r'G:\Projects\USA_General\Siting_Tool_Development\Site_Metrics_Tool\Tests\Sample_Tract_Tests_20221115\Desktop_Outputs.gdb\OK_GRDA_v01_TractID1323_Tract'
+    # inParcels = r'G:\Projects\USA_General\Siting_Tool_Development\Site_Metrics_Tool\Tests\Sample_Tracts_SMT4_Desktop_Test_20221129.gdb\Test_600_cluster'
 
     # debug only end  *****************************
 
@@ -120,11 +121,10 @@ try:
         rasterParams('Soil_Bedrock_Depth_1_to_100cm_rc1_nogaps', '58d9638faa9f48f681e286cab4218402', 'BdRckSh'),
         rasterParams('Soil_Bedrock_Depth_101_to_300cm_rc1_nogaps', 'b13310e293b844c3a18c56d1712d8f2c', 'BdRckMD')
     ]
-    vectorParams = namedtuple("vectorParams", "name id field whereClause")
+    vectorParams = namedtuple("vectorParams", "name id field")
     vector_inputs = [
-        vectorParams("FEMA Flood Hazard Areas", '1db6910429d14a60bebae24cc87648d5', 'F100',
-                     "FLD_ZONE in ('A', 'A99', 'AE', 'AH', 'AO')"),
-        vectorParams("FEMA Flood Hazard Areas", '1db6910429d14a60bebae24cc87648d5', 'F500', "FLD_ZONE in ('X')")
+        vectorParams("FEMA Flood Hazard Areas", '890e10f74f2441d2ae40398d2165b756', 'F100'),
+        vectorParams("FEMA Flood Hazard Areas", 'ff98979c68a64666859ded394bb4d9a4', 'F500')
     ]
 
     # inParcels = arcpy.FeatureSet(inParcels)
@@ -313,8 +313,8 @@ try:
                                                                                     tmp_run_id,
                                                                                     ID_FIELD_PARCELS_GEOPORTAL,
                                                                                     ID_FIELD_BLD_PARCELS_GEOPORTAL,
-                                                                                    tmp_vector.id, tmp_vector.field,
-                                                                                    tmp_vector.whereClause)
+                                                                                    tmp_vector.id,
+                                                                                    tmp_vector.field)
         resultList.append(tmp_vector_result)
 
     # Wait for all the calls to be processed
@@ -323,7 +323,7 @@ try:
         while tmp_result.status < 4:
             time.sleep(0.2)
             waitTime = time.time() - waitTimeStart
-            if waitTime > 120:
+            if waitTime > 1200:
                 arcpy.AddMessage(f"Error: map service not responding. {tmp_result}")
                 sys.exit()
 
@@ -364,6 +364,8 @@ try:
         'int')
     parcelsWithStatsSDF = parcelsSDF.merge(final_stats_table_merge, left_on=ID_FIELD_PARCELS_SDF,
                                            right_on=ID_FIELD_PARCELS_GEOPORTAL)
+
+    parcelsWithStatsSDF = parcelsWithStatsSDF.replace(np.nan, 0)
 
     t1 = time.time()
     arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1 - t0)}")
