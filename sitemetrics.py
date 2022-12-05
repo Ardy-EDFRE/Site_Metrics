@@ -97,7 +97,9 @@ try:
     # inParcels = r'G:\Projects\USA_General\Siting_Tool_Development\Site_Metrics_Tool\Tests\Sample_Tract_Tests_20221115\Desktop_Outputs.gdb\WI_Solar_v03_TractID14285_Tract'
     # inParcels = r'G:\Projects\USA_General\Siting_Tool_Development\Site_Metrics_Tool\Tests\Sample_Tract_Tests_20221115\Desktop_Outputs.gdb\OK_GRDA_v01_TractID1323_Tract'
     # inParcels = r'G:\Projects\USA_General\Siting_Tool_Development\Site_Metrics_Tool\Tests\Sample_Tracts_SMT4_Desktop_Test_20221129.gdb\Test_600_cluster'
-    inParcels = r'G:\Projects\USA_General\Siting_Tool_Development\Site_Metrics_Tool\Tests\Sample_Tracts_SMT4_Desktop_Test_20221129.gdb\Test_1k_Tracts_IPC_over640acres'
+    # inParcels = r'G:\Projects\USA_General\Siting_Tool_Development\Site_Metrics_Tool\Tests\Sample_Tracts_SMT4_Desktop_Test_20221129.gdb\Test_1k_Tracts_IPC_over640acres'
+    # inParcels = r'G:\Projects\USA_General\Siting_Tool_Development\Site_Metrics_Tool\Tests\Sample_Tracts_SMT4_Desktop_Test_20221129.gdb\Test_5k_Tracts_IPC_over120acres'
+    # inParcels = r'G:\Projects\USA_General\Siting_Tool_Development\Site_Metrics_Tool\Tests\Sample_Tracts_SMT4_Desktop_Test_20221129.gdb\Test_10k_Tracts_IPC_over_41acres'
 
     # debug only end  *****************************
 
@@ -160,7 +162,7 @@ try:
     buildableLyr = buildableItem.layers[0]
 
     # find the site metric parcels layer (site_metrics_inputParcelsDEV)
-    inputParcelsItem = gis.content.get('c52edce5c4324efea8383604903918ab')
+    inputParcelsItem = gis.content.get('a9ac200342824bcd8626dbe9f816ef4d')
     inputParcelsLyr = inputParcelsItem.layers[0]
     t1 = time.time()
     arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1 - t0)}")
@@ -289,9 +291,9 @@ try:
 
     # Make gp service calls asynchronously
     rasterToolbox = 'https://geoportal.edf-re.com/raggp/services;Other/getAcresAndPercRaster;token={};{}'.format(
-        gis.con.token, gis.url)
+        gis._con.token, gis.url)
     vectorToolbox = 'https://geoportal.edf-re.com/raggp/services;Other/getAcresAndPercVector;token={};{}'.format(
-        gis.con.token, gis.url)
+        gis._con.token, gis.url)
     arcpy.ImportToolbox(rasterToolbox)
     arcpy.ImportToolbox(vectorToolbox)
 
