@@ -1,6 +1,6 @@
 import sys
 import datetime
-
+import numpy as np
 import arcpy
 from collections import namedtuple
 from arcgis.gis import GIS
@@ -14,6 +14,7 @@ import pandas as pd
 import json
 import time
 from uuid import uuid4
+
 
 # # Permanently changes the pandas settings
 # pd.set_option('display.max_rows', None)
@@ -95,6 +96,8 @@ try:
     # inParcels = r"G:\Projects\USA_West\Flores\05_GIS\053_Data\Parcels_Flores_CoreLogic_TojLoad_LPM_20221024.shp"
     # inParcels = r'G:\Projects\USA_General\Siting_Tool_Development\Site_Metrics_Tool\Tests\Sample_Tract_Tests_20221115\Desktop_Outputs.gdb\WI_Solar_v03_TractID14285_Tract'
     # inParcels = r'G:\Projects\USA_General\Siting_Tool_Development\Site_Metrics_Tool\Tests\Sample_Tract_Tests_20221115\Desktop_Outputs.gdb\OK_GRDA_v01_TractID1323_Tract'
+    # inParcels = r'G:\Projects\USA_General\Siting_Tool_Development\Site_Metrics_Tool\Tests\Sample_Tracts_SMT4_Desktop_Test_20221129.gdb\Test_600_cluster'
+    inParcels = r'G:\Projects\USA_General\Siting_Tool_Development\Site_Metrics_Tool\Tests\Sample_Tracts_SMT4_Desktop_Test_20221129.gdb\Test_1k_Tracts_IPC_over640acres'
 
     # debug only end  *****************************
 
@@ -104,7 +107,7 @@ try:
     # BL_Source      # F100_Acres                # F500_Acres
     # BL_Acres       # F100_Pcnt                 # F500_Pcnt
     # BL_Pcnt        # F100_BL_Acres             # F500_BL_Acres
-                     # F100_BL_Pcnt              # F500_BL_Pcnt
+    # F100_BL_Pcnt              # F500_BL_Pcnt
 
     # Slope(raster)      # Forested Land(raster)  # Bedrock - Shallow   # Bedrock - MidDepth(101 to 300 cm)
     # Slp10_Acres        # Forest_Acres           # BdRckSh_Acres       # BdRckMD_Acres
@@ -119,10 +122,10 @@ try:
         rasterParams('Soil_Bedrock_Depth_1_to_100cm_rc1_nogaps', '58d9638faa9f48f681e286cab4218402', 'BdRckSh'),
         rasterParams('Soil_Bedrock_Depth_101_to_300cm_rc1_nogaps', 'b13310e293b844c3a18c56d1712d8f2c', 'BdRckMD')
     ]
-    vectorParams = namedtuple("vectorParams", "name id field whereClause")
+    vectorParams = namedtuple("vectorParams", "name id field")
     vector_inputs = [
-        vectorParams("FEMA Flood Hazard Areas", '1db6910429d14a60bebae24cc87648d5', 'F100', "FLD_ZONE in ('A', 'A99', 'AE', 'AH', 'AO')"),
-        vectorParams("FEMA Flood Hazard Areas", '1db6910429d14a60bebae24cc87648d5', 'F500', "FLD_ZONE in ('X')")
+        vectorParams("FEMA Flood Hazard Areas", '890e10f74f2441d2ae40398d2165b756', 'F100'),
+        vectorParams("FEMA Flood Hazard Areas", 'ff98979c68a64666859ded394bb4d9a4', 'F500')
     ]
 
     # inParcels = arcpy.FeatureSet(inParcels)
@@ -135,7 +138,7 @@ try:
     parcelsSDF = pd.DataFrame.spatial.from_featureclass('memory/tmp1')
     arcpy.Delete_management('memory/tmp1')
 
-    # main fields for identify parcels 
+    # main fields for identify parcels
     ID_FIELD_PARCELS_SDF = 'OBJECTID'
     ID_FIELD_PARCELS_GEOPORTAL = 'parcelid'
     ID_FIELD_BLD_PARCELS_GEOPORTAL = 'parcel_bld_id'
@@ -150,17 +153,17 @@ try:
     gis = GIS("https:??geoportal.edf-re.com?portal".replace(':??', '://').replace('?', '/'),
               "Geoportalcreator", "secret1creator**")
 
-    arcpy.AddMessage("Fecthing geoportal solar buildable land and holder for parcels")
+    arcpy.AddMessage("Fetching geoportal solar buildable land and holder for parcels")
     t0 = time.time()
     # find the solar national buildable land layer (National Solar Buildable Land)
     buildableItem = gis.content.get('21d180c3e40847a69c32cec4166fbeca')
     buildableLyr = buildableItem.layers[0]
 
-    # find the site metric parcels layer (site_metrics_inputParcels)
-    inputParcelsItem = gis.content.get('a9ac200342824bcd8626dbe9f816ef4d')
+    # find the site metric parcels layer (site_metrics_inputParcelsDEV)
+    inputParcelsItem = gis.content.get('c52edce5c4324efea8383604903918ab')
     inputParcelsLyr = inputParcelsItem.layers[0]
     t1 = time.time()
-    arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1-t0)}")
+    arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1 - t0)}")
 
     inParcelsDesc = arcpy.Describe(inParcels)
     inParcelsExtent = inParcelsDesc.extent
@@ -178,7 +181,7 @@ try:
     t0 = time.time()
     inputParcelsLyr.delete_features(where="1 = 1")
     t1 = time.time()
-    arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1-t0)}")
+    arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1 - t0)}")
 
     arcpy.AddMessage("Uploading parcels to geoportal")
     t0 = time.time()
@@ -218,7 +221,8 @@ try:
 
     # gis.content.search is for name specific & gis.content.get is for item id specific
     try:
-        parcels_item = gis.content.search(parcelsBuildableUnionLayerName, 'feature layer')[0]  # sitemetrics_parcels_buildable_union
+        parcels_item = gis.content.search(parcelsBuildableUnionLayerName, 'feature layer')[
+            0]  # sitemetrics_parcels_buildable_union
         parcels_item.delete()
     except Exception as e:
         arcpy.AddMessage('sitemetrics_parcels_buildable_union does not exist yet')
@@ -268,7 +272,8 @@ try:
     df_list.append(parcelBuildableAcres)
 
     # summarize area by parcelsBuildableUnionIDField
-    summarize_df = tmp_parcel_df.groupby([ID_FIELD_PARCELS_GEOPORTAL, ID_FIELD_BLD_PARCELS_GEOPORTAL]).analysisarea.sum().reset_index()
+    summarize_df = tmp_parcel_df.groupby(
+        [ID_FIELD_PARCELS_GEOPORTAL, ID_FIELD_BLD_PARCELS_GEOPORTAL]).analysisarea.sum().reset_index()
     summarize_df['analysisarea'] = summarize_df['analysisarea'].multiply(640)
 
     # pivot table to convert parcelsBuildableUnionIDField to parcelid
@@ -284,9 +289,9 @@ try:
 
     # Make gp service calls asynchronously
     rasterToolbox = 'https://geoportal.edf-re.com/raggp/services;Other/getAcresAndPercRaster;token={};{}'.format(
-        gis._con.token, gis.url)
+        gis.con.token, gis.url)
     vectorToolbox = 'https://geoportal.edf-re.com/raggp/services;Other/getAcresAndPercVector;token={};{}'.format(
-        gis._con.token, gis.url)
+        gis.con.token, gis.url)
     arcpy.ImportToolbox(rasterToolbox)
     arcpy.ImportToolbox(vectorToolbox)
 
@@ -297,9 +302,11 @@ try:
     for tmp_raster in raster_inputs:
         tmp_raster_result = arcpy.getAcresAndPercRaster.getAcresAndPercRaster(parcelsBuildableUnionLayerName,
                                                                               tmp_run_id,
-                                                                              ID_FIELD_PARCELS_GEOPORTAL, ID_FIELD_BLD_PARCELS_GEOPORTAL,
+                                                                              ID_FIELD_PARCELS_GEOPORTAL,
+                                                                              ID_FIELD_BLD_PARCELS_GEOPORTAL,
                                                                               'Area in Square Miles',
-                                                                              tmp_raster.id, tmp_raster.field)
+                                                                              tmp_raster.id,
+                                                                              tmp_raster.field)
         resultList.append(tmp_raster_result)
 
     arcpy.AddMessage("Making Vector Calls")
@@ -307,8 +314,10 @@ try:
     for tmp_vector in vector_inputs:
         tmp_vector_result = arcpy.getAcresAndPercVector.getAcresAndPercVector(unionItem.id,
                                                                               tmp_run_id,
-                                                                              ID_FIELD_PARCELS_GEOPORTAL, ID_FIELD_BLD_PARCELS_GEOPORTAL,
-                                                                              tmp_vector.id, tmp_vector.field, tmp_vector.whereClause)
+                                                                              ID_FIELD_PARCELS_GEOPORTAL,
+                                                                              ID_FIELD_BLD_PARCELS_GEOPORTAL,
+                                                                              tmp_vector.id,
+                                                                              tmp_vector.field)
         resultList.append(tmp_vector_result)
 
     # Wait for all the calls to be processed
@@ -354,9 +363,12 @@ try:
     t0 = time.time()
 
     arcpy.AddMessage("Joining stats tables to geometries")
-    final_stats_table_merge[ID_FIELD_PARCELS_GEOPORTAL] = final_stats_table_merge[ID_FIELD_PARCELS_GEOPORTAL].astype('int')
+    final_stats_table_merge[ID_FIELD_PARCELS_GEOPORTAL] = final_stats_table_merge[ID_FIELD_PARCELS_GEOPORTAL].astype(
+        'int')
     parcelsWithStatsSDF = parcelsSDF.merge(final_stats_table_merge, left_on=ID_FIELD_PARCELS_SDF,
-                                                        right_on=ID_FIELD_PARCELS_GEOPORTAL)
+                                           right_on=ID_FIELD_PARCELS_GEOPORTAL)
+
+    parcelsWithStatsSDF = parcelsWithStatsSDF.replace(np.nan, 0)
 
     t1 = time.time()
     arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1 - t0)}")
