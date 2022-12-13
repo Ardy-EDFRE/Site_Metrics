@@ -1,15 +1,16 @@
 import sys
+import os
 import datetime
 import numpy as np
 import arcpy
 from collections import namedtuple
 from arcgis.gis import GIS
-from arcgis.features import FeatureSet, GeoAccessor, GeoSeriesAccessor
-from arcgis.geometry import Geometry
-from arcgis.geometry.filters import intersects
+from arcgis.features import FeatureSet
+# from arcgis.features import GeoAccessor, GeoSeriesAccessor
+# from arcgis.geometry import Geometry
+# from arcgis.geometry.filters import intersects
 from arcgis.features.manage_data import overlay_layers
 from arcgis.features import find_locations
-from arcgis.geometry import filters
 import pandas as pd
 import json
 import time
@@ -21,6 +22,32 @@ from uuid import uuid4
 # pd.set_option('display.max_columns', None)
 # pd.set_option('display.width', None)
 # pd.set_option('display.max_colwidth', -1)
+
+
+def getVoltageWhereClauses(minVolt, maxVolt):
+    transWhereClause = ""
+    subsWhereClause = ""
+
+    if minVolt == '' and maxVolt == '':
+        return 'noWhereClause', 'noWhereClause'
+
+    if minVolt != '':
+        if int(minVolt) > 0:
+            transWhereClause = f'VOLTAGE_KV > {minVolt}'
+            subsWhereClause = f'MX_VOLT_KV > {minVolt}'
+
+    if maxVolt != '':
+        if int(maxVolt) > 0:
+            transWhereClause = f'VOLTAGE_KV < {maxVolt}'
+            subsWhereClause = f'MX_VOLT_KV < {maxVolt}'
+
+    if minVolt != '' and maxVolt != '':
+        if int(minVolt) > 0 and int(maxVolt) > 0:
+            transWhereClause = f'VOLTAGE_KV > {minVolt} AND VOLTAGE_KV < {maxVolt}'
+            subsWhereClause = f'MX_VOLT_KV > {minVolt} AND MX_VOLT_KV < {maxVolt}'
+
+    return transWhereClause, subsWhereClause
+
 
 def mapParcelIDandRunIDFields(inParcels, inParcelsIDField):
     runID = str(uuid4())
@@ -68,25 +95,49 @@ def uploadFeaturesToGeoportalLyr(inParcels, inputParcelsLyr, idFieldName):
     return inputParcelsLyr
 
 
-def createInAndOutBuildableField(unionFLyr):
-    union_fset = unionFLyr.query()
-    union_features = union_fset.features
+def createInAndOutBuildableField(unionFLyr, ID_FIELD_BLD_PARCELS_GEOPORTAL):
+    # add new parcelid field for identifying within buildable (parcel_bld_id)
+    parcel_bld_def = {'name': 'parcel_bld_id',
+                      'type': 'esriFieldTypeString',
+                      'alias': 'parcel_bld_id',
+                      'domain': None,
+                      'editable': True,
+                      'nullable': True,
+                      'sqlType': 'sqlTypeVarchar',
+                      'length': 255}
 
-    fid_job_column = [col for col in union_features[0].fields if 'fid_j' in col][0]
+    unionFLyr.manager.add_to_definition({'fields': [parcel_bld_def]})
 
-    for fd in union_features:
-        if fd.attributes[fid_job_column] < 1:
-            fd.attributes['parcel_bld_id'] = fd.attributes['parcelid'] + '_0'
-        else:
-            fd.attributes['parcel_bld_id'] = fd.attributes['parcelid'] + '_1'
+    # If the fid_feature_set field is -1 then parcelid = parcelid_0 otherwise parcelid = parcelid_1)
+    unionBLDField = ''
+    for fld in unionFLyr.properties.fields:
+        if fld.name.startswith('fid_j'):
+            unionBLDField = fld.name
 
-    unionFLyr.edit_features(updates=union_features)
+    unionFLyr.calculate(where=f"{unionBLDField}<1",
+                        calc_expression={"field": ID_FIELD_BLD_PARCELS_GEOPORTAL,
+                                         "sqlExpression": "CONCAT(parcelid, '_0')"})
+    unionFLyr.calculate(where=f"{unionBLDField}>=0",
+                        calc_expression={"field": ID_FIELD_BLD_PARCELS_GEOPORTAL,
+                                         "sqlExpression": "CONCAT(parcelid, '_1')"})
 
     return unionFLyr
 
+def loadGPServices():
+    rasterToolbox = r'https://geoportal.edf-re.com/raggp/services;Other/getAcresAndPercRaster;token={};{}'.format(
+        gis._con.token, gis.url)
+    vectorToolbox = r'https://geoportal.edf-re.com/raggp/services;Other/getAcresAndPercVector;token={};{}'.format(
+        gis._con.token, gis.url)
+    distanceToolbox = r'https://geoportal.edf-re.com/raggp/services;Other/getDistanceToNearest;token={};{}'.format(
+        gis._con.token, gis.url)
+    arcpy.ImportToolbox(rasterToolbox)
+    arcpy.ImportToolbox(vectorToolbox)
+    arcpy.ImportToolbox(distanceToolbox)
 
 try:
     inParcels = arcpy.GetParameter(0)
+    minVolt = arcpy.GetParameterAsText(1)
+    maxVolt = arcpy.GetParameterAsText(2)
 
     # debug only  *****************************
     # inParcels = r"G:\Users\Ardy\GIS\APRX\scratch.gdb\test_polys_nozm"
@@ -96,10 +147,15 @@ try:
     # inParcels = r"G:\Projects\USA_West\Flores\05_GIS\053_Data\Parcels_Flores_CoreLogic_TojLoad_LPM_20221024.shp"
     # inParcels = r'G:\Projects\USA_General\Siting_Tool_Development\Site_Metrics_Tool\Tests\Sample_Tract_Tests_20221115\Desktop_Outputs.gdb\WI_Solar_v03_TractID14285_Tract'
     # inParcels = r'G:\Projects\USA_General\Siting_Tool_Development\Site_Metrics_Tool\Tests\Sample_Tract_Tests_20221115\Desktop_Outputs.gdb\OK_GRDA_v01_TractID1323_Tract'
+    # inParcels = r'G:\Projects\USA_General\Siting_Tool_Development\Site_Metrics_Tool\Tests\Sample_Tracts_SMT4_Desktop_Test_20221129.gdb\Test_10_cluster'
     # inParcels = r'G:\Projects\USA_General\Siting_Tool_Development\Site_Metrics_Tool\Tests\Sample_Tracts_SMT4_Desktop_Test_20221129.gdb\Test_600_cluster'
+    # inParcels = r'G:\Projects\USA_General\Siting_Tool_Development\Site_Metrics_Tool\Tests\Sample_Tracts_SMT4_Desktop_Test_20221129.gdb\Test_5k_cluster'
     # inParcels = r'G:\Projects\USA_General\Siting_Tool_Development\Site_Metrics_Tool\Tests\Sample_Tracts_SMT4_Desktop_Test_20221129.gdb\Test_1k_Tracts_IPC_over640acres'
     # inParcels = r'G:\Projects\USA_General\Siting_Tool_Development\Site_Metrics_Tool\Tests\Sample_Tracts_SMT4_Desktop_Test_20221129.gdb\Test_5k_Tracts_IPC_over120acres'
     # inParcels = r'G:\Projects\USA_General\Siting_Tool_Development\Site_Metrics_Tool\Tests\Sample_Tracts_SMT4_Desktop_Test_20221129.gdb\Test_10k_Tracts_IPC_over_41acres'
+
+    # minVolt = ''
+    # maxVolt = ''
 
     # debug only end  *****************************
 
@@ -117,6 +173,9 @@ try:
     # Slp10_BL_Acres     # Forest_BL_Acres        # BdRckSh_BL_Acres    # BdRckMD_BL_Acres
     # Slp10_BL_Pcnt      # Forest_BL_Pcnt         # BdRckSh_BL_Pcnt     # BdRckMD_BL_Pcnt
 
+    # InServTrans_Name   # PropTrans_Name         # InServSubs_Name     # PropSubs_Name
+    # InServTrans_Miles  # PropTrans_Miles        # InServSubs_Miles    # PropSubs_Name
+
     rasterParams = namedtuple("rasterParams", "name id field")
     raster_inputs = [
         rasterParams('Forests_Only_From_LANDFIRE', 'ab97639707a846df87f7a2b6f4a91704', 'Forest'),
@@ -130,6 +189,15 @@ try:
         vectorParams("FEMA Flood Hazard Areas", 'ff98979c68a64666859ded394bb4d9a4', 'F500')
     ]
 
+    transmissionWhereClause, substationWhereClause = getVoltageWhereClauses(minVolt, maxVolt)
+
+    distanceParams = namedtuple("distanceParams", "name id sublayerid field whereclause ")
+    distance_inputs = [
+        distanceParams("Transmission_Lines_from_Velocity_Suite In Service", 'b3afb2c9f69a47cc8a3ddc9571c84856', '0', 'InServTrans', transmissionWhereClause),
+        distanceParams("Transmission_Lines_from_Velocity_Suite Proposed", 'b3afb2c9f69a47cc8a3ddc9571c84856', '1', 'PropTrans', transmissionWhereClause),
+        distanceParams('Substations_from_Velocity_Suite In Service', '978e2ef30e014722803bedbd126940e9', '0', 'InServSubs', substationWhereClause),
+        distanceParams('Substations_from_Velocity_Suite Proposed', '978e2ef30e014722803bedbd126940e9', '1', 'PropSubs', substationWhereClause)
+    ]
     # inParcels = arcpy.FeatureSet(inParcels)
     # in case the OBJECTIDs are not starting at 1
     fc = arcpy.CopyFeatures_management(inParcels, 'in_memory/fc')
@@ -158,14 +226,21 @@ try:
     arcpy.AddMessage("Fetching geoportal solar buildable land and holder for parcels")
     t0 = time.time()
     # find the solar national buildable land layer (National Solar Buildable Land)
-    buildableItem = gis.content.get('21d180c3e40847a69c32cec4166fbeca')
+    buildableItem = gis.content.get('754f20bf544d43c2bdfd7ff9e2713ddd')
     buildableLyr = buildableItem.layers[0]
 
-    # find the site metric parcels layer (site_metrics_inputParcelsDEV)
+    # find the site metric parcels layer (site_metrics_inputParcels)
     inputParcelsItem = gis.content.get('a9ac200342824bcd8626dbe9f816ef4d')
     inputParcelsLyr = inputParcelsItem.layers[0]
     t1 = time.time()
     arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1 - t0)}")
+
+    # check if the site metric parcel layer is already in use
+    numberOfParcels = inputParcelsLyr.query(where='1=1', return_count_only=True)
+    if numberOfParcels > 0:
+        arcpy.AddMessage("Tool already in used by another user")
+        arcpy.SetParameterAsText(4, "Tool already in used by another user")
+        os._exit(0)  # os._exit(0) doesn't execute the finally block and sys.exit() does
 
     inParcelsDesc = arcpy.Describe(inParcels)
     inParcelsExtent = inParcelsDesc.extent
@@ -177,13 +252,6 @@ try:
                           "spatialReference": {"wkid": inParcelsDesc.spatialReference.factoryCode}},
                "overwrite": True
                }
-
-    # Intersect buildable and parcels in geoportal
-    arcpy.AddMessage("Deleting old parcels in the geoportal layer ")
-    t0 = time.time()
-    inputParcelsLyr.delete_features(where="1 = 1")
-    t1 = time.time()
-    arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1 - t0)}")
 
     arcpy.AddMessage("Uploading parcels to geoportal")
     t0 = time.time()
@@ -197,18 +265,13 @@ try:
         parcel_bld_item = gis.content.search('tmpParcelSolar', 'feature layer')[0]  # tmpParcelSolar
         parcel_bld_item.delete()
     except Exception as e:
-        arcpy.AddMessage('tmpParcelSolar does not exist yet')
+        # arcpy.AddMessage('tmpParcelSolar does not exist yet')
+        pass
 
     arcpy.AddMessage("Selecting intersecting buildable features into a new geoportal layer")
     t0 = time.time()
     # 00:00:58.45 seconds - intersect find_locations
-    # find_locations - derive_new_locations returns partial feature records vs find_existing_locations was returning a much larger area
-    # selected_buildable_layer = find_locations.derive_new_locations(input_layers=[buildableLyr, inputParcelsLyr],
-    #                                                                expressions=[{"operator": "and", "layer": 0,
-    #                                                                              "spatialRel": "intersects",
-    #                                                                              "selectingLayer": 1}],
-    #                                                                output_name='tmpParcelSolar', context=context)
-
+    # find_locations - derive_new_locations returns partial feature records vs find_existing_locations was returning a much larger area\
     # 00:00:58.528 - withinDistance 0.1 feet find_locations
     selected_buildable_layer = find_locations.derive_new_locations(input_layers=[buildableLyr, inputParcelsLyr],
                                                                    expressions=[{"operator": "and",
@@ -223,16 +286,16 @@ try:
 
     # gis.content.search is for name specific & gis.content.get is for item id specific
     try:
-        parcels_item = gis.content.search(parcelsBuildableUnionLayerName, 'feature layer')[
-            0]  # sitemetrics_parcels_buildable_union
+        parcels_item = gis.content.search(parcelsBuildableUnionLayerName, 'feature layer')[0]  # sitemetrics_parcels_buildable_union
         parcels_item.delete()
     except Exception as e:
-        arcpy.AddMessage('sitemetrics_parcels_buildable_union does not exist yet')
+        arcpy.AddMessage(f'{parcelsBuildableUnionLayerName} does not exist yet')
 
     arcpy.AddMessage("Unionising parcels with solar national buildable land")
     t0 = time.time()
     unionItem = overlay_layers(inputParcelsLyr, selected_buildable_layer, overlay_type='Union',
                                output_name=parcelsBuildableUnionLayerName, context=context)
+    selected_buildable_layer.delete()
     t1 = time.time()
     arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1 - t0)}")
 
@@ -245,23 +308,14 @@ try:
     t1 = time.time()
     arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1 - t0)}")
 
-    # modify parcelid If fid_feature_set  is -1 then parcelid = parcelid_0 otherwise parcelid  = parcelid_1)
-    # add new parcelid field for identifying within buildable (parcel_bld_id)
-    parcel_bld_def = {'name': 'parcel_bld_id',
-                      'type': 'esriFieldTypeString',
-                      'alias': 'parcel_bld_id',
-                      'domain': None,
-                      'editable': True,
-                      'nullable': True,
-                      'sqlType': 'sqlTypeVarchar',
-                      'length': 255}
+    arcpy.AddMessage("Creating unique field to track buildable land and non buildable land inside the parcel")
+    t0 = time.time()
+    unionFLyr = createInAndOutBuildableField(unionFLyr, ID_FIELD_BLD_PARCELS_GEOPORTAL)
+    t1 = time.time()
+    arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1 - t0)}")
 
-    unionFLyr.manager.add_to_definition({'fields': [parcel_bld_def]})
-
-    unionFLyr = createInAndOutBuildableField(unionFLyr)
-
-    # get the current run ids. do we really need this?
-    tmp_parcel_df = unionFLyr.query().sdf
+    # get the sdf table without spatial for the unionized layer
+    tmp_parcel_df = unionFLyr.query(where='1=1', return_geometry=False).sdf
     tmp_run_id = tmp_parcel_df['runid'][0]
 
     df_list = []
@@ -274,8 +328,7 @@ try:
     df_list.append(parcelBuildableAcres)
 
     # summarize area by parcelsBuildableUnionIDField
-    summarize_df = tmp_parcel_df.groupby(
-        [ID_FIELD_PARCELS_GEOPORTAL, ID_FIELD_BLD_PARCELS_GEOPORTAL]).analysisarea.sum().reset_index()
+    summarize_df = tmp_parcel_df.groupby([ID_FIELD_PARCELS_GEOPORTAL, ID_FIELD_BLD_PARCELS_GEOPORTAL]).analysisarea.sum().reset_index()
     summarize_df['analysisarea'] = summarize_df['analysisarea'].multiply(640)
 
     # pivot table to convert parcelsBuildableUnionIDField to parcelid
@@ -290,16 +343,12 @@ try:
     df_list.append(tmp_pivot_table)
 
     # Make gp service calls asynchronously
-    rasterToolbox = 'https://geoportal.edf-re.com/raggp/services;Other/getAcresAndPercRaster;token={};{}'.format(
-        gis._con.token, gis.url)
-    vectorToolbox = 'https://geoportal.edf-re.com/raggp/services;Other/getAcresAndPercVector;token={};{}'.format(
-        gis._con.token, gis.url)
-    arcpy.ImportToolbox(rasterToolbox)
-    arcpy.ImportToolbox(vectorToolbox)
+    loadGPServices()
+
+    resultList = []
 
     arcpy.AddMessage("Making Raster Calls")
     t0 = time.time()
-    resultList = []
     # Make raster calls
     for tmp_raster in raster_inputs:
         tmp_raster_result = arcpy.getAcresAndPercRaster.getAcresAndPercRaster(parcelsBuildableUnionLayerName,
@@ -322,6 +371,18 @@ try:
                                                                               tmp_vector.field)
         resultList.append(tmp_vector_result)
 
+    arcpy.AddMessage("Making Distance Calls")
+    # Make distance calls
+    for tmp_dist in distance_inputs:
+        tmp_dist_result = arcpy.getDistanceToNearest.getDistanceToNearest(inputParcelsItem.id,
+                                                                                tmp_run_id,
+                                                                                ID_FIELD_PARCELS_GEOPORTAL,
+                                                                                tmp_dist.id,
+                                                                                tmp_dist.sublayerid,
+                                                                                tmp_dist.field,
+                                                                                tmp_dist.whereclause)
+        resultList.append(tmp_dist_result)
+
     # Wait for all the calls to be processed
     waitTimeStart = time.time()
     for tmp_result in resultList:
@@ -331,8 +392,16 @@ try:
             if waitTime > 1200:
                 arcpy.AddMessage(f"Error: map service not responding. {tmp_result}")
                 sys.exit()
+        arcpy.AddMessage(f'{tmp_result.getOutput(1)}')
 
     # This is added to get the resultOutputs from our gp results list to a record set
+    t1 = time.time()
+    arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1 - t0)}")
+
+    # Deleting old parcels in the geoportal layer
+    arcpy.AddMessage("Deleting old parcels in the geoportal layer ")
+    t0 = time.time()
+    inputParcelsLyr.delete_features(where="1 = 1")
     t1 = time.time()
     arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1 - t0)}")
 
@@ -382,14 +451,14 @@ try:
     inParcelsWithStats_arcpyfset = arcpy.FeatureSet()
     inParcelsWithStats_arcgisfset = parcelsWithStatsSDF.spatial.to_featureset()
     inParcelsWithStats_arcpyfset.load(inParcelsWithStats_arcgisfset)
-    arcpy.SetParameter(1, inParcelsWithStats_arcpyfset)
+    arcpy.SetParameter(3, inParcelsWithStats_arcpyfset)
 
     t1 = time.time()
     arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1 - t0)}")
 
     textResponse = f"### SITE METRICS COMPLETED SUCCESSFULLY BECAUSE I ROCK ###"
     arcpy.AddMessage(textResponse)
-    arcpy.SetParameterAsText(2, textResponse)
+    arcpy.SetParameterAsText(4, textResponse)
 
 except arcpy.ExecuteError:
     arcpy.AddMessage('-1-')
@@ -400,6 +469,13 @@ except arcpy.ExecuteError:
     arcpy.AddError(arcpy.GetMessages(1))
     arcpy.AddError('-2-')
     arcpy.AddError(arcpy.GetMessages(2))
+
 except Exception as e:
     arcpy.AddMessage(e)
     arcpy.AddError(e)
+
+finally:
+    arcpy.AddMessage("Deleting old parcels in the geoportal layer ")
+    inputParcelsItem = gis.content.get('a9ac200342824bcd8626dbe9f816ef4d')
+    inputParcelsLyr = inputParcelsItem.layers[0]
+    inputParcelsLyr.delete_features(where="1 = 1")
