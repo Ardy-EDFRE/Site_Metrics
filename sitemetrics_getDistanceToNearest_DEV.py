@@ -136,10 +136,10 @@ try:
                                      max_count="1",
                                      search_cutoff=100,
                                      search_cutoff_units="Miles",
-                                     output_name=f"sitemetrics_nearest_{proximityFieldPrefix}")
+                                     output_name=f"sitemetrics_nearest_{proximityFieldPrefix}_DEV")
     except Exception as e:
         try:
-            nearestItem = gis.content.search(f"sitemetrics_nearest_{proximityFieldPrefix}", 'feature layer')[0]  # tmpParcelSolar
+            nearestItem = gis.content.search(f"sitemetrics_nearest_{proximityFieldPrefix}_DEV", 'feature layer')[0]  # tmpParcelSolar
             nearestItem.delete()
         except Exception as e:
             textResponse = f"### {proximityFieldPrefix} FAILED ### "

@@ -9,7 +9,7 @@ try:
     runid = arcpy.GetParameterAsText(1)
     parcelsIDField = arcpy.GetParameterAsText(2)
     parcelsBuildableUnionIDField = arcpy.GetParameterAsText(3)
-    inParcelsAreaField = arcpy.GetParameterAsText(4)
+    inUnionAcresField = arcpy.GetParameterAsText(4)
     reclass01RasterItemName = arcpy.GetParameterAsText(5)
     reclass01RasterFieldPrefix = arcpy.GetParameterAsText(6)
     # # # ###    # debug only  *****************************
@@ -17,7 +17,7 @@ try:
     # runid = '25e3bdc1-d6da-440f-9066-0f8002586314'
     # parcelsIDField = 'parcelid'
     # parcelsBuildableUnionIDField = 'parcel_bld_id'
-    # inParcelsAreaField = 'Area in Square Miles'
+    # inUnionAcresField = 'uniongpacres'
     # reclass01RasterItemName = 'ab97639707a846df87f7a2b6f4a91704'
     # reclass01RasterFieldPrefix = 'Forest'
     # # # ####    # debug only end  *****************************
@@ -41,17 +41,17 @@ try:
     table_sdf = tableLyr.query().sdf
     # areas per parcel  (acres = sq miles * 640)
     zone_sdf = zoneFLyr.query().sdf
-    parcelAreasDF = zone_sdf.groupby([parcelsIDField]).analysisarea.sum().reset_index()
-    parcelAreasDF[f'Parcel_Acres'] = parcelAreasDF['analysisarea'].multiply(640)
-    parcelAreasDF.drop(columns=['analysisarea'], inplace=True)
+    parcelAreasDF = zone_sdf.groupby([parcelsIDField])[inUnionAcresField].sum().reset_index()
+    parcelAreasDF.rename(columns={"uniongpacres": "Parcel_Acres"}, inplace=True)
+
     # areas of buildable per parcel
-    parcelBLAreasDF = zone_sdf[zone_sdf[parcelsBuildableUnionIDField].str.endswith('_1')].groupby([parcelsIDField]).analysisarea.sum().reset_index()
-    parcelBLAreasDF[f'BL_Acres'] = parcelBLAreasDF['analysisarea'].multiply(640)
-    parcelBLAreasDF.drop(columns=['analysisarea'], inplace=True)
+    parcelBLAreasDF = zone_sdf[zone_sdf[parcelsBuildableUnionIDField].str.endswith('_1')].groupby([parcelsIDField])[inUnionAcresField].sum().reset_index()
+    parcelBLAreasDF.rename(columns={"uniongpacres": "BL_Acres"}, inplace=True)
+
     parcelAreasDF = pd.merge(parcelAreasDF, parcelBLAreasDF, on=parcelsIDField, how='left')
     # calculate the acres based on the mean value of the stats * the analysis area from the zone_sdf
     joinedDF = pd.merge(zone_sdf, table_sdf, on=parcelsBuildableUnionIDField, how='left')
-    joinedDF['buildAcres'] = joinedDF['analysisarea'] * joinedDF['mean']
+    joinedDF['buildAcres'] = joinedDF[inUnionAcresField] * joinedDF['mean']
     # summarize area by parcelsBuildableUnionIDField
     summarize_df = joinedDF.groupby([parcelsIDField, parcelsBuildableUnionIDField]).buildAcres.sum().reset_index()
     # pivot table to convert parcelsBuildableUnionIDField to parcelid
@@ -59,9 +59,9 @@ try:
     tmp_pivot_table = summarize_df.pivot_table(index=parcelsIDField, columns='buildableIndex', values='buildAcres')
     tmp_pivot_table.reset_index(inplace=True)
     # total acres (acres = sq miles * 640)
-    tmp_pivot_table[f'{reclass01RasterFieldPrefix}_Acres'] = (tmp_pivot_table['0'] + tmp_pivot_table['1']).multiply(640)
+    tmp_pivot_table[f'{reclass01RasterFieldPrefix}_Acres'] = (tmp_pivot_table['0'] + tmp_pivot_table['1'])
     # forest acres in buildable
-    tmp_pivot_table[f'{reclass01RasterFieldPrefix}_BL_Acres'] = tmp_pivot_table['1'].multiply(640)
+    tmp_pivot_table[f'{reclass01RasterFieldPrefix}_BL_Acres'] = tmp_pivot_table['1']
     # fix fields
     tmp_pivot_table.drop(columns=['0', '1'], inplace=True)
     # bring in the total parcel area
