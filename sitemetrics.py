@@ -258,7 +258,7 @@ try:
     arcpy.AddMessage("Selecting intersecting buildable features into a new geoportal layer")
     t0 = time.time()
     try:
-        parcel_bld_item = gis.content.search('tmpParcelSolar', 'feature layer')[0]  # tmpParcelSolar
+        parcel_bld_item = gis.content.search('sitemetrics_selectedBuildable', 'feature layer')[0]  # sitemetrics_selectedBuildable
         parcel_bld_item.delete()
     except Exception as e:
         pass

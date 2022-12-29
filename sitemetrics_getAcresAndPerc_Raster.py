@@ -13,7 +13,7 @@ try:
     reclass01RasterItemName = arcpy.GetParameterAsText(5)
     reclass01RasterFieldPrefix = arcpy.GetParameterAsText(6)
     # # # ###    # debug only  *****************************
-    # parcelsBuildableUnionItemName = 'sitemetrics_parcels_buildable_union_DEV'
+    # parcelsBuildableUnionItemName = 'sitemetrics_parcels_buildable_union'
     # runid = '25e3bdc1-d6da-440f-9066-0f8002586314'
     # parcelsIDField = 'parcelid'
     # parcelsBuildableUnionIDField = 'parcel_bld_id'
