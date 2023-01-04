@@ -129,6 +129,7 @@ try:
     maxVolt = arcpy.GetParameterAsText(2)
 
     # debug only  *****************************
+	# inParcels = 'a9ac200342824bcd8626dbe9f816ef4d'
     # inParcels = r"G:\Users\Ardy\GIS\APRX\scratch.gdb\test_polys_nozm"
     # inParcels = r"G:\Users\Ardy\GIS\APRX\scratch.gdb\test_parcels_FEMA"
     # inParcels = r"G:\Users\JoseLuis\arcgis_scripts_enxco\site_metrics\test_parcels_FEMA.shp"
@@ -258,7 +259,7 @@ try:
     arcpy.AddMessage("Selecting intersecting buildable features into a new geoportal layer")
     t0 = time.time()
     try:
-        parcel_bld_item = gis.content.search('sitemetrics_selectedBuildable', 'feature layer')[0]  # sitemetrics_selectedBuildable
+        parcel_bld_item = gis.content.search('tmpParcelSolar', 'feature layer')[0]  # sitemetrics_selectedBuildable
         parcel_bld_item.delete()
     except Exception as e:
         pass
@@ -306,8 +307,8 @@ try:
 
     arcpy.AddMessage("Removing buildable land outside the parcels")
     t0 = time.time()
-    arcpy.CalculateField_management('memory/parcBuildUnion', "uniongpacres", "!shape.area@acres!", "PYTHON3", "",
-                                    "DOUBLE")
+    # arcpy.CalculateField_management('memory/parcBuildUnion', "uniongpacres", "!shape.area@acres!", "ARCADE", "", "DOUBLE")
+    arcpy.CalculateField_management('memory/parcBuildUnion', "uniongpacres", "(round(Area($feature, 'acres'),1))", "ARCADE", "", "DOUBLE")
     selectedLyr = arcpy.SelectLayerByAttribute_management('memory/parcBuildUnion', "NEW_SELECTION",
                                                           'FID_parc=-1 OR uniongpacres<0.5')
     arcpy.DeleteRows_management(selectedLyr)
@@ -333,7 +334,8 @@ try:
     unionSDF = unionSDF[['parcelid', 'parcel_bld_id', 'uniongpacres', 'SHAPE']].copy()
     # the best is to upload this to geoportal is to use unionFLyr.append, not unionFLyr.edit_features(adds=unionSDF)
     # the problem is that unionFLyr.append needs to create a feature layer from the SDF first with unionSDF.spatial.to_featurelayer
-    unionFLyr = unionSDF.spatial.to_featurelayer(title=parcelsBuildableUnionLayerName, service_name="sitemetrics_parcels_buildable_union")
+    unionFLyr = unionSDF.spatial.to_featurelayer(title=parcelsBuildableUnionLayerName)
+    # unionFLyr = unionSDF.spatial.to_featurelayer(title=parcelsBuildableUnionLayerName, service_name="sitemetrics_parcels_buildable_union")
     t1 = time.time()
     arcpy.AddMessage(f"...   ... done in  {datetime.timedelta(seconds=t1 - t0)}")
 
